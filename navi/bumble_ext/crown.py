@@ -119,7 +119,7 @@ class CrownDevice:
 
     # flush & re-initialize device.
     await self.device.host.flush()
-    self.device.host = None
+    self.device.host = None  # type: ignore[assignment]
     self.device = _make_device(self.config)
 
     # close HCI transport.

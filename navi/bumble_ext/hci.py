@@ -18,31 +18,33 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 import dataclasses
-from typing import Any, ClassVar, Self, Tuple, TypeVar
+from typing import Any, ClassVar, Self, TypeVar
 
 from bumble import hci
-from typing_extensions import override
 
 
 def parse_address_followed_by_type(
     data: bytes, offset: int = 0
-) -> Tuple[int, hci.Address]:
-  return offset + 7, hci.Address(data[offset : offset + 6], data[offset + 6])
+) -> tuple[int, hci.Address]:
+  return offset + 7, hci.Address(
+      data[offset : offset + 6], hci.AddressType(data[offset + 6])
+  )
 
 
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class _HciPacket(hci.HCI_Packet):
   """Base extended HCI packet."""
 
   PARSE_OFFSET: ClassVar[int] = 0
 
-  @override
   @classmethod
   def from_parameters(cls: type[Self], parameters: bytes) -> Self:
+    """Creates an HCI packet from the given parameters."""
     offset = cls.PARSE_OFFSET
     values = []
     for field in dataclasses.fields(cls):
       value, size = hci.HCI_Object.parse_field(
-          parameters, offset, field.type.__metadata__[0]
+          parameters, offset, field.type.__metadata__[0]  # type: ignore[union-attr]
       )
       offset += size
       values.append(value)
@@ -60,9 +62,9 @@ class _HciPacket(hci.HCI_Packet):
     )
 
   @property
-  def fields(self) -> list[Tuple[str, Any]]:
+  def fields(self) -> list[tuple[str, Any]]:
     return [
-        (field.name, field.type.__metadata__[0])
+        (field.name, field.type.__metadata__[0])  # type: ignore[union-attr]
         for field in dataclasses.fields(self)
     ]
 
@@ -70,7 +72,7 @@ class _HciPacket(hci.HCI_Packet):
 class Command(_HciPacket, hci.HCI_Command):
   """Base extended HCI command."""
 
-  op_code: ClassVar[int]
+  op_code: ClassVar[int]  # type: ignore[misc]
   return_parameters_fields: ClassVar[Sequence[tuple[str, Any]]] = ()
 
   @classmethod

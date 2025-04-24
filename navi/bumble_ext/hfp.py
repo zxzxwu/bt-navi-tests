@@ -55,7 +55,7 @@ ESCO_PARAMETERS_T2_TRANSPARENT = hfp.EscoParameters(
 
 class HfProtocol(hfp.HfProtocol):
   """Customized HF Protocol."""
-  controller_supported_codecs: list[hci.CodingFormat] | None = None
+  controller_supported_codecs: list[hci.CodecID] | None = None
 
   @override
   async def setup_codec_connection(self, codec_id: int) -> None:
@@ -69,7 +69,7 @@ class HfProtocol(hfp.HfProtocol):
         "disconnection", self.execute_command(f"AT+BCS={codec_id}")
     )
 
-  async def _get_controller_supported_codecs(self) -> list[hci.CodingFormat]:
+  async def _get_controller_supported_codecs(self) -> list[hci.CodecID]:
     """Returns codecs supported by the controller."""
     device = self.dlc.multiplexer.l2cap_channel.connection.device
     try:

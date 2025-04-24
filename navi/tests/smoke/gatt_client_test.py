@@ -81,7 +81,8 @@ class GattClientTest(navi_test_base.TwoDevicesTestBase):
 
     write_future = asyncio.get_running_loop().create_future()
 
-    def on_write(_: device.Connection, value: bytes) -> None:
+    def on_write(connection: device.Connection | None, value: bytes) -> None:
+      del connection  # Unused.
       write_future.set_result(value)
 
     self.ref.device.add_service(
@@ -113,6 +114,8 @@ class GattClientTest(navi_test_base.TwoDevicesTestBase):
     characteristic = bl4a_api.find_characteristic_by_uuid(
         characteristic_uuid, services
     )
+    if not characteristic.handle:
+      self.fail("Cannot find characteristic.")
 
     self.logger.info("[DUT] Write characteristic.")
     expected_value = secrets.token_bytes(16)
@@ -168,6 +171,8 @@ class GattClientTest(navi_test_base.TwoDevicesTestBase):
     characteristic = bl4a_api.find_characteristic_by_uuid(
         characteristic_uuid, services
     )
+    if not characteristic.handle:
+      self.fail("Cannot find characteristic.")
 
     self.logger.info("[DUT] Read characteristic.")
     actual_value = await gatt_client.read_characteristic(characteristic.handle)
@@ -221,6 +226,8 @@ class GattClientTest(navi_test_base.TwoDevicesTestBase):
     characteristic = bl4a_api.find_characteristic_by_uuid(
         characteristic_uuid, services
     )
+    if not characteristic.handle:
+      self.fail("Cannot find characteristic.")
 
     self.logger.info("[DUT] Subscribe characteristic.")
     await gatt_client.subscribe_characteristic_notifications(

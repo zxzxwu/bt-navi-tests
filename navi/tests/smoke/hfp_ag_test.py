@@ -289,6 +289,8 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
     rfcomm_channel = await rfcomm.find_rfcomm_channel_with_uuid(
         dut_ref_acl, core.BT_HANDSFREE_AUDIO_GATEWAY_SERVICE
     )
+    if rfcomm_channel is None:
+      self.fail("No HFP RFCOMM channel found on REF.")
     self.logger.info("[REF] Found HFP RFCOMM channel %s.", rfcomm_channel)
 
     self.logger.info("[REF] Open RFCOMM Multiplexer.")
@@ -595,7 +597,9 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
     ):
       ref_hfp_protocol = await self.ref_hfp_protocol_queue.get()
 
-    ag_indicators = collections.defaultdict(asyncio.Queue[int])
+    ag_indicators = collections.defaultdict[
+        hfp.AgIndicator, asyncio.Queue[int]
+    ](asyncio.Queue)
 
     def on_ag_indicator(ag_indicator: hfp.AgIndicatorState) -> None:
       ag_indicators[ag_indicator.indicator].put_nowait(
@@ -845,7 +849,9 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       ):
         ref_hfp_protocol = await self.ref_hfp_protocol_queue.get()
 
-    ag_indicators = collections.defaultdict(asyncio.Queue[int])
+    ag_indicators = collections.defaultdict[
+        hfp.AgIndicator, asyncio.Queue[int]
+    ](asyncio.Queue)
 
     def on_ag_indicator(ag_indicator: hfp.AgIndicatorState) -> None:
       ag_indicators[ag_indicator.indicator].put_nowait(
@@ -909,7 +915,9 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       ):
         ref_hfp_protocol = await self.ref_hfp_protocol_queue.get()
 
-    ag_indicators = collections.defaultdict(asyncio.Queue[int])
+    ag_indicators = collections.defaultdict[
+        hfp.AgIndicator, asyncio.Queue[int]
+    ](asyncio.Queue)
 
     def on_ag_indicator(ag_indicator: hfp.AgIndicatorState) -> None:
       ag_indicators[ag_indicator.indicator].put_nowait(

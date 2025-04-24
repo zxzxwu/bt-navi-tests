@@ -400,7 +400,7 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
       # Override pairing config factory to set identity address type and
       # io capability.
       ref.device.pairing_config_factory = lambda _: pairing.PairingConfig(
-          identity_address_type=hci.Address.RANDOM_DEVICE_ADDRESS,
+          identity_address_type=pairing.PairingConfig.AddressType.RANDOM,
           delegate=pairing.PairingDelegate(),
       )
     self.first_bond_timestamp = None

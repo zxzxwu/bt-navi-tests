@@ -58,7 +58,7 @@ class TestVariant(enum.Enum):
 
 
 _Direction = constants.Direction
-_Role = constants.HciRole
+_Role = hci.Role
 _KeyDistribution = pairing.PairingDelegate.KeyDistribution
 _IoCapability = pairing.PairingDelegate.IoCapability
 _AndroidPairingVariant = android_constants.PairingVariant
@@ -126,7 +126,7 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
     ref_addr = str(self.ref.address)
 
     ref_dut: device.Connection
-    auth_task: asyncio.tasks.Task = None
+    auth_task: asyncio.tasks.Task | None = None
     if pairing_direction == _Direction.OUTGOING:
       self.logger.info('[REF] Prepare to accept connection.')
       ref_accept_task = asyncio.tasks.create_task(
@@ -292,7 +292,7 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
         )
 
       self.logger.info('[REF] REF has role=%s.', _Role(ref_dut.role).name)
-      pair_task: asyncio.tasks.Task = None
+      pair_task: asyncio.tasks.Task | None = None
       if ref_dut.role == _Role.CENTRAL:
         # [REF] Send SMP pairing request.
         pair_task = asyncio.tasks.create_task(ref_dut.pair())

@@ -284,7 +284,7 @@ def register_sink_buffer(
       def on_avdtp_packet(packet: bytes) -> None:
         buffer.extend(packet)
 
-      sink.on_avdtp_packet = on_avdtp_packet
+      sink.on_avdtp_packet = on_avdtp_packet  # type: ignore[method-assign]
       if sink.stream and sink.stream.rtp_channel:
         sink.stream.rtp_channel.sink = sink.on_avdtp_packet
     case A2dpCodec.APTX_HD:

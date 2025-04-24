@@ -233,7 +233,9 @@ class MapTest(navi_test_base.TwoDevicesTestBase):
       android_constants.SmsMessageType.INBOX,
       android_constants.SmsMessageType.SENT,
   )
-  async def test_get_sms(self, message_type: int) -> None:
+  async def test_get_sms(
+      self, message_type: android_constants.SmsMessageType
+  ) -> None:
     """Tests getting SMS message from DUT.
 
     Test Steps:
@@ -281,7 +283,8 @@ class MapTest(navi_test_base.TwoDevicesTestBase):
       response = await client.send_request(request)
     self.assertEqual(response.response_code, obex.ResponseCode.SUCCESS)
     body = response.headers.body or response.headers.end_of_body or b''
-    self.assertIsNotNone(msg := ET.fromstring(body).find('msg'))
+    if (msg := ET.fromstring(body).find('msg')) is None:
+      self.fail('Failed to find message in message listing.')
     self.assertIsNotNone(handle := msg.attrib.get('handle'))
 
     self.logger.info('[REF] Get SMS Message with handle %s.', handle)

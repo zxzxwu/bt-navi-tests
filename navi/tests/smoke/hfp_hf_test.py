@@ -62,13 +62,11 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
   @classmethod
   def _ag_configuration(
       cls,
-      supported_ag_features: Iterable[hfp.AgFeature] | None = None,
-      supported_ag_indicators: Sequence[hfp.AgIndicator] | None = None,
-      supported_hf_indicators: Iterable[hfp.HfIndicator] | None = None,
-      supported_ag_call_hold_operations: (
-          Iterable[hfp.CallHoldOperation] | None
-      ) = None,
-      supported_audio_codecs: Iterable[hfp.AudioCodec] | None = None,
+      supported_ag_features: Iterable[hfp.AgFeature] = (),
+      supported_ag_indicators: Sequence[hfp.AgIndicatorState] = (),
+      supported_hf_indicators: Iterable[hfp.HfIndicator] = (),
+      supported_ag_call_hold_operations: Iterable[hfp.CallHoldOperation] = (),
+      supported_audio_codecs: Iterable[hfp.AudioCodec] = (),
   ) -> hfp.AgConfiguration:
     return hfp.AgConfiguration(
         supported_ag_features=(

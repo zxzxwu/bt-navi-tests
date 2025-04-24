@@ -119,7 +119,7 @@ class RasControlPointOperation:
     raise NotImplementedError
 
   @classmethod
-  def from_bytes(cls: type[Self], data: bytes) -> Self:
+  def from_bytes(cls: type[Self], data: bytes) -> RasControlPointOperation:
     match data[0]:
       case RasControlPointOpCode.GET_RANGING_DATA:
         return GetRangingDataOperation.from_bytes(data)
@@ -229,7 +229,7 @@ class ControlPointOperationResponse:
   op_code: ClassVar[RasControlPointResponseOpCode]
 
   @classmethod
-  def from_bytes(cls: type[Self], data: bytes) -> Self:
+  def from_bytes(cls: type[Self], data: bytes) -> ControlPointOperationResponse:
     match data[0]:
       case RasControlPointResponseOpCode.COMPLETE_RANGING_DATA_RESPONSE:
         return CompleteRangingDataResponse.from_bytes(data)

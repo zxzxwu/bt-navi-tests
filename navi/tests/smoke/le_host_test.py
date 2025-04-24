@@ -225,10 +225,10 @@ class LeHostTest(navi_test_base.TwoDevicesTestBase):
       scan_results = asyncio.Queue[device.Advertisement]()
 
       @watcher.on(self.ref.device, 'advertisement')
-      def on_advertising_report(adv: device.Advertisement) -> None:
+      def _(adv: device.Advertisement) -> None:
         if (
             service_uuids := adv.data.get(
-                _AdvertisingData.COMPLETE_LIST_OF_128_BIT_SERVICE_CLASS_UUIDS
+                _AdvertisingData.Type.COMPLETE_LIST_OF_128_BIT_SERVICE_CLASS_UUIDS
             )
         ) and service_uuid in service_uuids:
           scan_results.put_nowait(adv)
@@ -312,7 +312,7 @@ class LeHostTest(navi_test_base.TwoDevicesTestBase):
     def on_advertising_report(adv: device.Advertisement) -> None:
       if (
           service_uuids := adv.data.get(
-              _AdvertisingData.COMPLETE_LIST_OF_128_BIT_SERVICE_CLASS_UUIDS
+              _AdvertisingData.Type.COMPLETE_LIST_OF_128_BIT_SERVICE_CLASS_UUIDS
           )
       ) and service_uuid in service_uuids:
         scan_results.put_nowait(adv)

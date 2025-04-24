@@ -53,7 +53,7 @@ _DEFAULT_CALLBACK_TIMEOUT_SECONDS = 30.0
 
 def _make_json_object(arg: Any) -> Any:
   """Converts an object to a JSON-style object."""
-  if dataclasses.is_dataclass(arg):
+  if dataclasses.is_dataclass(arg) and not isinstance(arg, type):
     arg = dataclasses.asdict(arg)
 
   if isinstance(arg, str):
@@ -1089,24 +1089,28 @@ class ScanResult(JsonDeserializableEvent):
     if scan_result := mapping.get(snippet_constants.SCAN_RESULT):
       return cls.from_mapping(scan_result)
 
-    service_data = cast(
+    raw_service_data = cast(
         dict[str, str] | None,
         mapping.get(snippet_constants.ADV_DATA_SERVICE_DATA),
     )
-    manufacturer_data = cast(
+    raw_manufacturer_data = cast(
         dict[str, str] | None,
         mapping.get(snippet_constants.ADV_DATA_MANUFACTURER_DATA),
     )
-    if service_data is not None:
+    if raw_service_data is not None:
       service_data = {
           key: base64.b64decode(value)
-          for key, value in cast(dict[str, str], service_data).items()
+          for key, value in cast(dict[str, str], raw_service_data).items()
       }
-    if manufacturer_data is not None:
+    else:
+      service_data = None
+    if raw_manufacturer_data is not None:
       manufacturer_data = {
           int(key): base64.b64decode(value)
-          for key, value in cast(dict[str, str], manufacturer_data).items()
+          for key, value in cast(dict[str, str], raw_manufacturer_data).items()
       }
+    else:
+      manufacturer_data = None
 
     if (
         ad_flags_value := mapping.get(snippet_constants.ADV_DATA_FLAGS)
@@ -1283,7 +1287,7 @@ class LegacyAdvertiser:
     )
     if not cookie:
       raise RuntimeError('Failed to start advertising.')
-    return LegacyAdvertiser(cookie=cookie, snippet=snippet)
+    return cls(cookie=cookie, snippet=snippet)
 
   def stop(self) -> None:
     self.snippet.stopAdvertisingSet(self.cookie)
@@ -1329,7 +1333,7 @@ class ExtendedAdvertisingSet:
             _make_json_object(scan_response),
         ),
     )
-    return ExtendedAdvertisingSet(cookie=cookie, snippet=snippet)
+    return cls(cookie=cookie, snippet=snippet)
 
   def stop(self) -> None:
     self.snippet.stopAdvertisingSet(self.cookie)

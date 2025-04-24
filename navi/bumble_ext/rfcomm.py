@@ -39,7 +39,7 @@ class Multiplexer(rfcomm.Multiplexer):
   ) -> None:
     super().__init__(l2cap_channel, role)
     self.dlc_callback = dlc_callback
-    self.acceptor = acceptor
+    self._acceptor = acceptor
 
   @override
   def on_mcc_pn(self, c_r: bool, pn: rfcomm.RFCOMM_MCC_PN) -> None:
@@ -47,7 +47,7 @@ class Multiplexer(rfcomm.Multiplexer):
       _logger.debug('<<< PN Command: %s', pn)
 
       channel_number = pn.dlci >> 1
-      if self.acceptor and self.acceptor(channel_number):
+      if self._acceptor and self._acceptor(channel_number):
         # Create a new DLC
         dlc = rfcomm.DLC(
             self,

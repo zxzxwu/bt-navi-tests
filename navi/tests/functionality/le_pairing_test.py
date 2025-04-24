@@ -15,9 +15,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 import contextlib
 import enum
 import itertools
+from typing import Any
 import uuid
 
 from bumble import core
@@ -131,7 +133,7 @@ class LePairingTest(navi_test_base.TwoDevicesTestBase):
 
       def on_advertising_report(adv: device.Advertisement) -> None:
         if service_uuids := adv.data.get(
-            core.AdvertisingData.COMPLETE_LIST_OF_128_BIT_SERVICE_CLASS_UUIDS
+            core.AdvertisingData.Type.COMPLETE_LIST_OF_128_BIT_SERVICE_CLASS_UUIDS
         ):
           if service_uuid in service_uuids and not scan_result.done():
             scan_result.set_result(adv.address)
@@ -271,7 +273,7 @@ class LePairingTest(navi_test_base.TwoDevicesTestBase):
     # ##############################################
 
     ref_dut: device.Connection
-    pair_task: asyncio.Task = None
+    pair_task: asyncio.Task | None = None
     if connection_direction == _Direction.OUTGOING:
       if pairing_direction == _Direction.INCOMING:
         ref_dut = await self._make_outgoing_connection(
@@ -382,6 +384,7 @@ class LePairingTest(navi_test_base.TwoDevicesTestBase):
 
     if pair_task:
       self.logger.info('[REF] Wait pairing complete.')
+      expected_errors: list[type[BaseException]]
       match variant:
         case TestVariant.REJECT | TestVariant.REJECTED:
           expected_errors = [core.ProtocolError]
@@ -479,7 +482,7 @@ class LePairingTest(navi_test_base.TwoDevicesTestBase):
 
     # ####################### Connecting ##########################
     ref_dut: device.Connection
-    pair_task: asyncio.Task = None
+    pair_task: asyncio.Task | None = None
     if connection_direction == _Direction.OUTGOING:
       if pairing_direction == _Direction.INCOMING:
         ref_dut = await self._make_outgoing_connection(
@@ -541,6 +544,7 @@ class LePairingTest(navi_test_base.TwoDevicesTestBase):
     dut_accept = variant != TestVariant.REJECT
     ref_accept = variant != TestVariant.REJECTED
     ref_answer: pairing_utils.PairingAnswer
+    dut_answer: Callable[[], Any]
 
     self.logger.info('[DUT] Check reported pairing method.')
     match ref_io_capability, connection_direction:
@@ -615,6 +619,7 @@ class LePairingTest(navi_test_base.TwoDevicesTestBase):
 
     if pair_task:
       self.logger.info('[REF] Wait pairing complete.')
+      expected_errors: list[type[BaseException]]
       match variant:
         case TestVariant.REJECT | TestVariant.REJECTED:
           expected_errors = [core.ProtocolError]

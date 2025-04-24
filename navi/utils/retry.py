@@ -20,9 +20,6 @@ import inspect
 import logging
 import math
 import time
-from typing import Any, Callable, TypeVar
-
-_F = TypeVar('_F', bound=Callable[..., Any])
 
 
 def retry_on_exception(
@@ -31,7 +28,7 @@ def retry_on_exception(
     max_delay_sec: float = math.inf,
     exception_type: type[Exception] = Exception,
     log_exception: bool = True,
-) -> Callable[[_F], _F]:
+):
   """Decorator to retry a function on exception.
 
   Args:
@@ -45,7 +42,7 @@ def retry_on_exception(
     The decorated function.
   """
 
-  def decorator(func: _F) -> _F:
+  def decorator(func):
     if inspect.iscoroutinefunction(func):
 
       @functools.wraps(func)

@@ -294,6 +294,8 @@ class ThroughputTest(navi_test_base.TwoDevicesTestBase):
     characteristic_handle = bl4a_api.find_characteristic_by_uuid(
         _CHARACTERISTIC_UUID, await gatt_client.discover_services()
     ).handle
+    if characteristic_handle is None:
+      self.fail("Characteristic not found.")
     # Subscribe to notifications.
     await gatt_client.subscribe_characteristic_notifications(
         characteristic_handle

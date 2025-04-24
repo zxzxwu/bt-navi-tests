@@ -265,7 +265,8 @@ class PbapTest(navi_test_base.TwoDevicesTestBase):
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):
       response = await client.send_request(request)
     self.assertEqual(response.response_code, obex.ResponseCode.SUCCESS)
-    self.assertIsNotNone(response.headers.app_parameters)
+    if not response.headers.app_parameters:
+      self.fail('Missing app parameters.')
     response_app_params = pbap.ApplicationParameters.from_bytes(
         response.headers.app_parameters
     )

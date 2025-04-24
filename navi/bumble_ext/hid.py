@@ -530,7 +530,7 @@ class Server(Generic[_Protocol]):
         handler=self._on_interrupt_channel,
     )
     self.protocol_factory = protocol_factory
-    self._pending_connections = asyncio.Queue()
+    self._pending_connections = asyncio.Queue[_Protocol]()
 
   def _on_control_channel(self, channel: l2cap.ClassicChannel) -> None:
     self._pending_control_channels[channel.connection] = channel

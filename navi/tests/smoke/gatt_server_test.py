@@ -278,6 +278,9 @@ class GattServerTest(navi_test_base.TwoDevicesTestBase):
     dut_characteristic = bl4a_api.find_characteristic_by_uuid(
         characteristic_uuid, self.dut_gatt_server.services
     )
+    if not dut_characteristic.handle:
+      self.fail("Cannot find characteristic.")
+
     self.logger.info("[REF] Connect to DUT.")
     ref_dut_acl = await self._make_le_connection()
 

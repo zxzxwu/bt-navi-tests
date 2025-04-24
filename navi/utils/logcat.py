@@ -14,6 +14,8 @@
 
 """Utils for logcat."""
 
+from __future__ import annotations
+
 import asyncio
 from collections.abc import AsyncGenerator
 import contextlib
@@ -22,7 +24,8 @@ import logging
 import logging.handlers
 import re
 import subprocess
-from typing import Self, cast
+from typing import IO, cast
+
 from mobly.controllers import android_device
 from mobly.controllers.android_device_lib.services import base_service
 from typing_extensions import override
@@ -36,6 +39,7 @@ class LogcatForwardingService(base_service.BaseService):
     tag: str = "NaviTest"
 
   _process: subprocess.Popen[str] | None = None
+  _logcat_handler: logging.StreamHandler[IO[str]] | None = None
 
   def __init__(
       self, device: android_device.AndroidDevice, configs: Config | None = None
@@ -87,7 +91,7 @@ class LogcatForwardingService(base_service.BaseService):
       configs: Config | None = None,
       alias: str = "logcat_forwarding",
       start_service: bool = True,
-  ) -> Self:
+  ) -> LogcatForwardingService:
     """Registers the logcat forwarding service to the device.
 
     Args:

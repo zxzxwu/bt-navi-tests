@@ -510,6 +510,7 @@ class BaseTestBase(base_test.BaseTestClass, absltest.TestCase):
 
   @override
   def record_data(self, content: dict[str, Any] | RecordData) -> None:
+    content_dict: dict[str, Any]
     if isinstance(content, RecordData):
       content_dict = {
           "properties": content.properties,
@@ -693,7 +694,9 @@ class AndroidBumbleTestBase(BaseTestBase):
     # Register logcat forwarding service for DUT.
     logcat.LogcatForwardingService.register(
         self.dut.device,
-        configs=logcat.LogcatForwardingService.Config(tag=self.TAG),
+        configs=logcat.LogcatForwardingService.Config(
+            tag=self.TAG or self.__class__.__name__
+        ),
     )
 
     # Record firmware and prebuilt version to sponge properties.
@@ -718,10 +721,11 @@ class AndroidBumbleTestBase(BaseTestBase):
         destination_base_path=self.current_test_info.output_path,
     )
     for ref in self._refs:
+      address_str = ref.address.replace(":", "-")
       with open(
           pathlib.Path(
               self.current_test_info.output_path,
-              f"bumble_{ref.address.replace(':', '-')}_btsnoop.log",
+              f"bumble_{address_str}_btsnoop.log",
           ),
           "wb",
       ) as f:
@@ -957,4 +961,4 @@ class MultiDevicesTestBase(AndroidBumbleTestBase):
   @override
   async def async_setup_class(self) -> None:
     await super().async_setup_class()
-    self.refs = self._refs
+    self.refs = list(self._refs)

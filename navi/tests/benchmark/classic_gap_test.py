@@ -40,7 +40,7 @@ _MINOR_CASE_DEFAULT_REPEAT_TIMES = 5
 _DEFAULT_REPEAT_TIMES = 50
 _DEFAULT_STEP_TIMEOUT_SECONDS = 5.0
 _Direction = constants.Direction
-_Role = constants.HciRole
+_Role = hci.Role
 _IoCapability = pairing.PairingDelegate.IoCapability
 _Callback = bl4a_api.CallbackHandler
 
@@ -157,7 +157,7 @@ class ClassicGapTest(navi_test_base.TwoDevicesTestBase):
     self.close_after_test.append(dut_cb)
     ref_addr = str(self.ref.address)
     begin = datetime.datetime.now()
-    auth_task: asyncio.tasks.Task = None
+    auth_task: asyncio.tasks.Task | None = None
     if pairing_direction == _Direction.OUTGOING:
       self.logger.info("[REF] Prepare to accept connection.")
       ref_accept_task = asyncio.tasks.create_task(

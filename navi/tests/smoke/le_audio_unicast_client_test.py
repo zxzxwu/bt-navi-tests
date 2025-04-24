@@ -13,6 +13,7 @@
 #  limitations under the License.
 
 import asyncio
+from collections.abc import Sequence
 import contextlib
 import decimal
 import struct
@@ -823,6 +824,7 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
           await ref_tbs_client.call_friendly_name.wait_for_target_value(
               bytes([1]) + _CALLER_NAME.encode()
           )
+      expected_call_states: Sequence[ccp.CallState]
       if direction == _Direction.INCOMING:
         async with self.assert_not_timeout(
             _DEFAULT_STEP_TIMEOUT_SECONDS,

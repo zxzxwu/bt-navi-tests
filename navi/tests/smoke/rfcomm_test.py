@@ -50,7 +50,6 @@ class RfcommTest(navi_test_base.TwoDevicesTestBase):
     await super().async_setup_test()
 
     # Using highest authentication level to allow secure sockets.
-    @override
     def pairing_config_factory(
         connection: device.Connection,
     ) -> pairing.PairingConfig:

@@ -331,7 +331,7 @@ class ServerConnection(obex.ServerSession):
   def __init__(self, bearer: rfcomm.DLC):
     self.connections = set[int]()
     self.sessions = dict[int, TransferSession]()
-    self.connection_result: asyncio.Future[int] = (
+    self.connection_result: asyncio.Future[int | None] = (
         asyncio.get_running_loop().create_future()
     )
     self.completed_sessions = asyncio.Queue[TransferSession]()

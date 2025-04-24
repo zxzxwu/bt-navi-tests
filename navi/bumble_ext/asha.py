@@ -121,7 +121,7 @@ class AshaService(gatt.TemplateService):
     self.audio_sink = audio_sink
     self.protocol_version = protocol_version
 
-    self.read_only_properties_characteristic = gatt.Characteristic(
+    self.read_only_properties_characteristic = gatt.Characteristic[bytes](
         gatt.GATT_ASHA_READ_ONLY_PROPERTIES_CHARACTERISTIC,
         gatt.Characteristic.Properties.READ,
         gatt.Characteristic.READABLE,
@@ -137,21 +137,21 @@ class AshaService(gatt.TemplateService):
         ),
     )
 
-    self.audio_control_point_characteristic = gatt.Characteristic(
+    self.audio_control_point_characteristic = gatt.Characteristic[bytes](
         gatt.GATT_ASHA_AUDIO_CONTROL_POINT_CHARACTERISTIC,
         gatt.Characteristic.Properties.WRITE
         | gatt.Characteristic.Properties.WRITE_WITHOUT_RESPONSE,
         gatt.Characteristic.WRITEABLE,
         gatt.CharacteristicValue(write=self._on_audio_control_point_write),
     )
-    self.audio_status_characteristic = gatt.Characteristic(
+    self.audio_status_characteristic = gatt.Characteristic[bytes](
         gatt.GATT_ASHA_AUDIO_STATUS_CHARACTERISTIC,
         gatt.Characteristic.Properties.READ
         | gatt.Characteristic.Properties.NOTIFY,
         gatt.Characteristic.READABLE,
         bytes([AudioStatus.OK]),
     )
-    self.volume_characteristic = gatt.Characteristic(
+    self.volume_characteristic = gatt.Characteristic[bytes](
         gatt.GATT_ASHA_VOLUME_CHARACTERISTIC,
         gatt.Characteristic.Properties.WRITE_WITHOUT_RESPONSE,
         gatt.Characteristic.WRITEABLE,
@@ -163,7 +163,7 @@ class AshaService(gatt.TemplateService):
         spec=l2cap.LeCreditBasedChannelSpec(psm=self.psm, max_credits=8),
         handler=self._on_connection,
     ).psm
-    self.le_psm_out_characteristic = gatt.Characteristic(
+    self.le_psm_out_characteristic = gatt.Characteristic[bytes](
         gatt.GATT_ASHA_LE_PSM_OUT_CHARACTERISTIC,
         gatt.Characteristic.Properties.READ,
         gatt.Characteristic.READABLE,
@@ -195,7 +195,7 @@ class AshaService(gatt.TemplateService):
 
   # Handler for audio control commands
   async def _on_audio_control_point_write(
-      self, connection: bumble_device.Connection, value: bytes
+      self, connection: bumble_device.Connection | None, value: bytes
   ) -> None:
     del connection
     _logger.debug('--- AUDIO CONTROL POINT Write:%s', value.hex())

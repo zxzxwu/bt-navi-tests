@@ -17,7 +17,7 @@
 import asyncio
 import dataclasses
 import random
-from typing import Annotated, ClassVar, cast
+from typing import Annotated, Protocol, cast
 
 from bumble import core
 from bumble import device
@@ -48,6 +48,18 @@ _DEFAULT_TIMEOUT_SECEONDS = 10.0
 _SUBGROUP_INDEX = 0
 
 
+class _LePeriodicAdvertisingSyncTransferReceivedEvent(Protocol):
+  status: int
+  connection_handle: int
+  service_data: int
+  sync_handle: int
+  advertising_sid: int
+  advertiser_address: hci.Address
+  advertiser_phy: int
+  periodic_advertising_interval: int
+  advertiser_clock_accuracy: int
+
+
 # TODO: Remove this when Bumble command is synced to G3.
 @dataclasses.dataclass(frozen=True)
 class _LeSetDefaultPeriodicAdvertisingSyncTransferParametersCommand(
@@ -55,7 +67,7 @@ class _LeSetDefaultPeriodicAdvertisingSyncTransferParametersCommand(
 ):
   """See Bluetooth spec @ 7.8.92 LE Set Default Periodic Advertising Sync Transfer Parameters command."""
 
-  op_code: ClassVar[int] = (
+  op_code = (  # type: ignore[misc]
       hci.HCI_LE_SET_DEFAULT_PERIODIC_ADVERTISING_SYNC_TRANSFER_PARAMETERS_COMMAND
   )
 
@@ -113,7 +125,7 @@ class _BroadcastAudioScanService(gatt.TemplateService):
   def __init__(self) -> None:
     self.operations = asyncio.Queue[bass.ControlPointOperation]()
     self.broadcast_audio_scan_control_point_characteristic = (
-        gatt.Characteristic(
+        gatt.Characteristic[bytes](
             uuid=gatt.GATT_BROADCAST_AUDIO_SCAN_CONTROL_POINT_CHARACTERISTIC,
             properties=gatt.Characteristic.Properties.WRITE
             | gatt.Characteristic.Properties.WRITE_WITHOUT_RESPONSE,
@@ -125,7 +137,7 @@ class _BroadcastAudioScanService(gatt.TemplateService):
             ),
         )
     )
-    self.broadcast_receive_state_characteristic = gatt.Characteristic(
+    self.broadcast_receive_state_characteristic = gatt.Characteristic[bytes](
         uuid=gatt.GATT_BROADCAST_RECEIVE_STATE_CHARACTERISTIC,
         properties=gatt.Characteristic.Properties.READ
         | gatt.Characteristic.Properties.NOTIFY,
@@ -192,7 +204,7 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
       if (
           (
               ads := advertisement.data.get_all(
-                  core.AdvertisingData.SERVICE_DATA_16_BIT_UUID
+                  core.AdvertisingData.Type.SERVICE_DATA_16_BIT_UUID
               )
           )
           and (
@@ -626,13 +638,11 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
 
     # Configure PAST handler.
     past_events = asyncio.Queue[
-        hci.HCI_LE_Periodic_Advertising_Sync_Transfer_Received_Event
+        _LePeriodicAdvertisingSyncTransferReceivedEvent
     ]()
 
     # TODO: Remove this when handler is synced to G3.
-    def on_past_event(
-        event: hci.HCI_LE_Periodic_Advertising_Sync_Transfer_Received_Event,
-    ) -> None:
+    def on_past_event(event: _LePeriodicAdvertisingSyncTransferReceivedEvent):
       past_events.put_nowait(event)
       pa_sync = device.PeriodicAdvertisingSync(
           self.ref.device,
@@ -724,7 +734,7 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
 
       async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECEONDS):
         self.logger.info('[REF] Update broadcast receive state')
-        receiver_state.pa_sync_state = (
+        receiver_state.big_encryption = (
             bass.BroadcastReceiveState.BigEncryption.DECRYPTING
         )
         self._ref_bass_service.broadcast_receive_state_characteristic.value = (

@@ -380,32 +380,39 @@ class Connection(utils.CompositeEventEmitter):
         the packet.
     """
     _logger.debug(">> %s", packet)
+    bnep_packet: bnep.Packet
     match strip_source_address, strip_destination_address:
       case True, True:
-        packet = bnep.CompressedEthernet(
+        bnep_packet = bnep.CompressedEthernet(
             networking_protocol_type=packet.protocol_type,
             payload=packet.payload,
         )
       case True, False:
-        packet = bnep.CompressedEthernetDestOnly(
-            destination_address=packet.destination_address,
+        bnep_packet = bnep.CompressedEthernetDestOnly(
+            destination_address=(
+                packet.destination_address or hci.Address(bytes(6))
+            ),
             networking_protocol_type=packet.protocol_type,
             payload=packet.payload,
         )
       case False, True:
-        packet = bnep.CompressedEthernetSourceOnly(
-            source_address=packet.source_address,
+        bnep_packet = bnep.CompressedEthernetSourceOnly(
+            source_address=packet.source_address or hci.Address(bytes(6)),
             networking_protocol_type=packet.protocol_type,
             payload=packet.payload,
         )
       case False, False:
-        packet = bnep.GeneralEthernet(
-            source_address=packet.source_address,
-            destination_address=packet.destination_address,
+        bnep_packet = bnep.GeneralEthernet(
+            source_address=packet.source_address or hci.Address(bytes(6)),
+            destination_address=(
+                packet.destination_address or hci.Address(bytes(6))
+            ),
             networking_protocol_type=packet.protocol_type,
             payload=packet.payload,
         )
-    self.send_packet(packet)
+      case _:
+        raise ValueError("Unsupported Ethernet frame")
+    self.send_packet(bnep_packet)
 
   def send_packet(self, packet: bnep.Packet) -> None:
     """Sends a BNEP packet to the remote device.

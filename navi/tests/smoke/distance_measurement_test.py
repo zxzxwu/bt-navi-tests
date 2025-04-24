@@ -45,13 +45,13 @@ class _RangingService(gatt.TemplateService):
     self.real_time_ranging_data_subscrptions = dict[
         device.Connection, tuple[bool, bool]
     ]()
-    self.ras_features_characteristic = gatt.Characteristic(
+    self.ras_features_characteristic = gatt.Characteristic[bytes](
         rap.GATT_RAS_FEATURES_CHARACTERISTIC,
         properties=gatt.Characteristic.Properties.READ,
         permissions=gatt.Characteristic.Permissions.READ_REQUIRES_ENCRYPTION,
         value=struct.pack('<I', ras_features),
     )
-    self.real_time_ranging_data_characteristic = gatt.Characteristic(
+    self.real_time_ranging_data_characteristic = gatt.Characteristic[bytes](
         rap.GATT_REAL_TIME_RANGING_DATA_CHARACTERISTIC,
         properties=(
             gatt.Characteristic.Properties.INDICATE
@@ -60,7 +60,7 @@ class _RangingService(gatt.TemplateService):
         permissions=gatt.Characteristic.Permissions.READ_REQUIRES_ENCRYPTION,
     )
 
-    self.on_demand_ranging_data_characteristic = gatt.Characteristic(
+    self.on_demand_ranging_data_characteristic = gatt.Characteristic[bytes](
         rap.GATT_ON_DEMAND_RANGING_DATA_CHARACTERISTIC,
         properties=(
             gatt.Characteristic.Properties.INDICATE
@@ -69,7 +69,7 @@ class _RangingService(gatt.TemplateService):
         permissions=gatt.Characteristic.Permissions.READ_REQUIRES_ENCRYPTION,
     )
 
-    self.ras_control_point_characteristic = gatt.Characteristic(
+    self.ras_control_point_characteristic = gatt.Characteristic[bytes](
         rap.GATT_RAS_CONTROL_POINT_CHARACTERISTIC,
         properties=(
             gatt.Characteristic.Properties.INDICATE
@@ -84,7 +84,7 @@ class _RangingService(gatt.TemplateService):
         ),
     )
 
-    self.ranging_data_ready_characteristic = gatt.Characteristic(
+    self.ranging_data_ready_characteristic = gatt.Characteristic[bytes](
         rap.GATT_RANGING_DATA_READY_CHARACTERISTIC,
         properties=(
             gatt.Characteristic.Properties.INDICATE
@@ -95,7 +95,7 @@ class _RangingService(gatt.TemplateService):
         value=struct.pack('<H', 0),
     )
 
-    self.ranging_data_overwritten_characteristic = gatt.Characteristic(
+    self.ranging_data_overwritten_characteristic = gatt.Characteristic[bytes](
         rap.GATT_RANGING_DATA_OVERWRITTEN_CHARACTERISTIC,
         properties=(
             gatt.Characteristic.Properties.INDICATE

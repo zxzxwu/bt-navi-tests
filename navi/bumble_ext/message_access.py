@@ -80,9 +80,6 @@ class SupportedMessageTypes(enum.IntFlag):
 class ApplicationParameter:
   """See MAP specification, 6.3.1 Application Parameters header."""
 
-  tag: int
-  value: int | str
-
   class Tag(enum.IntEnum):
     """See MAP specification, 6.3.1 Application Parameters header."""
 
@@ -169,6 +166,9 @@ class ApplicationParameter:
       Tag.MAP_SUPPORTED_FEATURES: 4,
   }
 
+  tag: Tag
+  value: int | str
+
   def to_bytes(self) -> bytes:
     """Converts the application parameter to bytes."""
     if isinstance(self.value, str):
@@ -192,6 +192,7 @@ class ApplicationParameter:
     tag = cls.Tag(data[offset])
     length = data[offset + 1]
     expected_length = cls.APPLICATION_PARAMETER_LENGTHS[tag]
+    value: int | str
     if expected_length == cls.TEXT_LENGTH:
       value = data[offset + 2 : offset + 2 + length].decode('utf-8')
     elif expected_length in (cls.HEX_128_BIT, cls.HEX_64_BIT):

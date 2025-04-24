@@ -87,7 +87,7 @@ class AshaTest(navi_test_base.TwoDevicesTestBase):
         await dut_audio_cb.wait_for_event(
             bl4a_api.AudioDeviceAdded,
             lambda e: (
-                e.device_type == android_constants.AudioDeviceType.HEARING_AID,
+                e.device_type == android_constants.AudioDeviceType.HEARING_AID
             ),
         )
 

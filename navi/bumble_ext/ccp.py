@@ -86,7 +86,8 @@ class StatusFlag(enum.IntFlag):
     return struct.pack('<H', self.value)
 
   @classmethod
-  def from_bytes(cls: Type[Self], data: bytes) -> Self:
+  def parse_from(cls: Type[Self], data: bytes, offset: int = 0) -> Self:
+    del offset  # Unused.
     return cls(struct.unpack('<H', data)[0])
 
 

@@ -59,9 +59,6 @@ class SupportedRepositories(enum.IntFlag):
 class ApplicationParameter:
   """See PBAP specification, 6.2.1 Application Parameters header."""
 
-  tag: int
-  value: bytes | int
-
   class Tag(enum.IntEnum):
     """See PBAP specification, 6.2.1 Application Parameters header."""
 
@@ -101,6 +98,9 @@ class ApplicationParameter:
       # Tag.SEARCH_VALUE should have bytes type.
   }
 
+  tag: Tag
+  value: bytes | int
+
   def to_bytes(self) -> bytes:
     """Converts the application parameter to bytes."""
     if isinstance(self.value, bytes):
@@ -119,6 +119,7 @@ class ApplicationParameter:
     """Creates an application parameter from the given bytes."""
     tag = cls.Tag(data[offset])
     length = data[offset + 1]
+    value: bytes | int
     if tag == cls.Tag.SEARCH_VALUE:
       value = data[offset + 2 : offset + 2 + length]
     else:

@@ -77,7 +77,7 @@ class HeaderIdentifier(enum.IntEnum):
   SINGLE_RESPONSE_MODE_PARAMETERS = 0x98
 
   def __str__(self) -> str:
-    return f'{self.name}[0x{self.value:02X}]'
+    return f'{self.name}[0x{self.value:02X}]'  # pylint: disable=bad-whitespace
 
 
 class Opcode(enum.IntEnum):
@@ -172,6 +172,7 @@ class Header:
     """Creates a header from the given bytes."""
     id_ = HeaderIdentifier(data[offset])
     offset += 1
+    value: int | str | bytes
     match id_ >> 6:
       case 0b00:
         # 2-bytes big-endian unsigned length(including header),
@@ -271,7 +272,7 @@ class Headers:
       header, offset = Header.parse_from(data, offset)
       headers[header.id.name.lower()] = header.value
 
-    return offset, cls(**headers)
+    return offset, cls(**headers)  # type: ignore[arg-type]
 
   def __bytes__(self) -> bytes:
     headers: list[Header] = []

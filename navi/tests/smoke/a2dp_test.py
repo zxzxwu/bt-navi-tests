@@ -135,7 +135,9 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
       - avrcp.Protocol: AVRCP protocol.
       - asyncio.Queue: Queue of AVDTP connections.
     """
-    avdtp_connections = asyncio.Queue[avdtp.Protocol]()
+    avdtp_connections = asyncio.Queue[
+        tuple[avdtp.Protocol, dict[_A2dpCodec, LocalSinkWrapper]]
+    ]()
     self.ref.device.sdp_service_records = {
         _A2DP_SERVICE_RECORD_HANDLE: a2dp.make_audio_sink_service_sdp_records(
             _A2DP_SERVICE_RECORD_HANDLE
@@ -629,9 +631,7 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
       self.logger.info("[DUT] Wait for track transition.")
       await dut_player_cb.wait_for_event(
           bl4a_api.PlayerMediaItemTransition,
-          lambda e: (
-              "sample-1.mp3" in cast(bl4a_api.PlayerMediaItemTransition, e).uri
-          ),
+          lambda e: (e.uri is not None and "sample-1.mp3" in e.uri),
       )
 
       self.logger.info("[REF] Go back to the previous track.")
@@ -643,9 +643,7 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
       self.logger.info("[DUT] Wait for track transition.")
       await dut_player_cb.wait_for_event(
           bl4a_api.PlayerMediaItemTransition,
-          lambda e: (
-              "sample-0.mp3" in cast(bl4a_api.PlayerMediaItemTransition, e).uri
-          ),
+          lambda e: (e.uri is not None and "sample-0.mp3" in e.uri),
       )
 
   async def test_noisy_handling(self) -> None:

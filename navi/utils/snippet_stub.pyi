@@ -255,7 +255,7 @@ class BluetoothSnippet(snippet_client_v2.SnippetClientV2):
   # Broadcast
   def startBroadcast(
       self,
-      broadcast_code: bytes | None = None,
+      broadcast_code: list[int] | None = None,
       settings: dict[str, Any] | None = None,
   ) -> int: ...
   def stopBroadcast(self, broadcast_id: int) -> None: ...
