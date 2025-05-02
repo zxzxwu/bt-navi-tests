@@ -19,7 +19,7 @@ import decimal
 import enum
 import functools
 import tempfile
-from typing import Iterable, TypeAlias, cast
+from typing import Iterable, TypeAlias
 
 from bumble import a2dp
 from bumble import avc
@@ -40,6 +40,7 @@ from navi.utils import android_constants
 from navi.utils import audio
 from navi.utils import bl4a_api
 from navi.utils import constants
+from navi.utils import matcher
 
 _A2DP_SERVICE_RECORD_HANDLE = 1
 _AVRCP_CONTROLLER_RECORD_HANDLE = 2
@@ -199,8 +200,10 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for A2DP connected.")
       await dut_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: (e.state == android_constants.ConnectionState.CONNECTED),
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.CONNECTED,
+          ),
       )
       async with self.assert_not_timeout(
           _DEFAULT_STEP_TIMEOUT_SECONDS, msg="[REF] Wait for A2DP connected."
@@ -208,8 +211,7 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
         avdtp_connection, ref_sinks = await avdtp_connections.get()
       self.logger.info("[DUT] Wait for A2DP becomes active.")
       await dut_cb.wait_for_event(
-          bl4a_api.ProfileActiveDeviceChanged,
-          lambda e: (e.address == self.ref.address),
+          bl4a_api.ProfileActiveDeviceChanged(address=self.ref.address),
           timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
       )
 
@@ -234,8 +236,10 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
         return
       await ref_acl.disconnect()
       await dut_cb.wait_for_event(
-          bl4a_api.AclDisconnected,
-          lambda e: (e.address == self.ref.address),
+          bl4a_api.AclDisconnected(
+              address=self.ref.address,
+              transport=android_constants.Transport.CLASSIC,
+          ),
       )
 
   async def _avrcp_key_click(
@@ -262,13 +266,14 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for A2DP connected.")
       await dut_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: (e.state == android_constants.ConnectionState.CONNECTED),
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.CONNECTED,
+          ),
       )
       self.logger.info("[DUT] Wait for A2DP becomes active.")
       await dut_cb.wait_for_event(
-          bl4a_api.ProfileActiveDeviceChanged,
-          lambda e: (e.address == self.ref.address),
+          bl4a_api.ProfileActiveDeviceChanged(address=self.ref.address),
           timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
       )
 
@@ -292,13 +297,14 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for A2DP connected.")
       await dut_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: (e.state == android_constants.ConnectionState.CONNECTED),
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.CONNECTED,
+          ),
       )
       self.logger.info("[DUT] Wait for A2DP becomes active.")
       await dut_cb.wait_for_event(
-          bl4a_api.ProfileActiveDeviceChanged,
-          lambda e: (e.address == self.ref.address),
+          bl4a_api.ProfileActiveDeviceChanged(address=self.ref.address),
           timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
       )
 
@@ -307,8 +313,10 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for A2DP disconnected.")
       await dut_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: (e.state == android_constants.ConnectionState.DISCONNECTED),
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.DISCONNECTED,
+          ),
       )
 
   async def test_paired_connect_incoming(self) -> None:
@@ -343,13 +351,14 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for A2DP connected.")
       await dut_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: (e.state == android_constants.ConnectionState.CONNECTED),
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.CONNECTED,
+          ),
       )
       self.logger.info("[DUT] Wait for A2DP becomes active.")
       await dut_cb.wait_for_event(
-          bl4a_api.ProfileActiveDeviceChanged,
-          lambda e: (e.address == self.ref.address),
+          bl4a_api.ProfileActiveDeviceChanged(address=self.ref.address),
           timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
       )
 
@@ -358,8 +367,10 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for A2DP disconnected.")
       await dut_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: (e.state == android_constants.ConnectionState.DISCONNECTED),
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.DISCONNECTED,
+          ),
       )
 
   @navi_test_base.parameterized(
@@ -421,8 +432,9 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
       if self.dut.bt.isA2dpPlaying(self.ref.address):
         self.logger.info("[DUT] A2DP is streaming, wait for A2DP stopped.")
         await dut_cb.wait_for_event(
-            bl4a_api.A2dpPlayingStateChanged,
-            predicate=lambda e: (e.state == _A2dpState.NOT_PLAYING),
+            bl4a_api.A2dpPlayingStateChanged(
+                self.ref.address, _A2dpState.NOT_PLAYING
+            ),
         )
       async with (
           self.assert_not_timeout(
@@ -449,14 +461,14 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
           )
         self.logger.info("[DUT] Wait for playback started.")
         await dut_player_cb.wait_for_event(
-            bl4a_api.PlayerIsPlayingChanged,
-            lambda e: (cast(bl4a_api.PlayerIsPlayingChanged, e).is_playing),
+            bl4a_api.PlayerIsPlayingChanged(is_playing=True)
         )
 
       self.logger.info("[DUT] Wait for A2DP started.")
       await dut_cb.wait_for_event(
-          callback_type=bl4a_api.A2dpPlayingStateChanged,
-          predicate=lambda e: (e.state == _A2dpState.PLAYING),
+          bl4a_api.A2dpPlayingStateChanged(
+              address=self.ref.address, state=_A2dpState.PLAYING
+          )
       )
       async with (
           self.assert_not_timeout(
@@ -482,14 +494,14 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
           )
         self.logger.info("[DUT] Wait for playback stopped.")
         await dut_player_cb.wait_for_event(
-            bl4a_api.PlayerIsPlayingChanged,
-            lambda e: (not cast(bl4a_api.PlayerIsPlayingChanged, e).is_playing),
+            bl4a_api.PlayerIsPlayingChanged(is_playing=False)
         )
 
       self.logger.info("[DUT] Wait for A2DP stopped.")
       await dut_cb.wait_for_event(
-          callback_type=bl4a_api.A2dpPlayingStateChanged,
-          predicate=lambda e: (e.state == _A2dpState.NOT_PLAYING),
+          bl4a_api.A2dpPlayingStateChanged(
+              address=self.ref.address, state=_A2dpState.NOT_PLAYING
+          )
       )
       async with (
           self.assert_not_timeout(
@@ -571,8 +583,9 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
 
         self.logger.info("[DUT] Wait for volume changed.")
         volume_changed_event = await dut_audio_cb.wait_for_event(
-            callback_type=bl4a_api.VolumeChanged,
-            predicate=lambda e: (e.stream_type == _StreamType.MUSIC),
+            bl4a_api.VolumeChanged(
+                stream_type=_StreamType.MUSIC, volume_value=matcher.ANY
+            ),
         )
         self.assertEqual(volume_changed_event.volume_value, dut_expected_volume)
 
@@ -618,8 +631,7 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for playback started.")
       await dut_player_cb.wait_for_event(
-          bl4a_api.PlayerIsPlayingChanged,
-          lambda e: (cast(bl4a_api.PlayerIsPlayingChanged, e).is_playing),
+          bl4a_api.PlayerIsPlayingChanged(is_playing=True)
       )
 
       self.logger.info("[REF] Go to the next track.")
@@ -675,14 +687,14 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for playback started.")
       await dut_player_cb.wait_for_event(
-          bl4a_api.PlayerIsPlayingChanged,
-          lambda e: ((cast(bl4a_api.PlayerIsPlayingChanged, e).is_playing)),
+          bl4a_api.PlayerIsPlayingChanged(is_playing=True),
       )
       if not self.dut.bt.isA2dpPlaying(self.ref.address):
         self.logger.info("[DUT] Wait for A2DP playing.")
         await dut_a2dp_cb.wait_for_event(
-            bl4a_api.A2dpPlayingStateChanged,
-            lambda e: (e.state == android_constants.A2dpState.PLAYING),
+            bl4a_api.A2dpPlayingStateChanged(
+                self.ref.address, _A2dpState.PLAYING
+            ),
         )
 
     # Streaming for 1 second.
@@ -703,8 +715,7 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for player paused.")
       await dut_player_cb.wait_for_event(
-          bl4a_api.PlayerIsPlayingChanged,
-          lambda e: (not (cast(bl4a_api.PlayerIsPlayingChanged, e).is_playing)),
+          bl4a_api.PlayerIsPlayingChanged(is_playing=False),
       )
 
 

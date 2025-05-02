@@ -16,7 +16,7 @@
 
 import asyncio
 import datetime
-from typing import TypeAlias, cast
+from typing import TypeAlias
 
 from bumble import a2dp
 from bumble import avdtp
@@ -96,9 +96,9 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
       state: _ConnectionState,
   ) -> None:
     await dut_hfp_ag_callback.wait_for_event(
-        callback_type=bl4a_api.ProfileConnectionStateChanged,
-        predicate=lambda e: (
-            e.address == self.ref.address and e.state == state
+        bl4a_api.ProfileConnectionStateChanged(
+            address=self.ref.address,
+            state=state,
         ),
         timeout=datetime.timedelta(seconds=10),
     )
@@ -109,10 +109,7 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
       state: _ScoState,
   ) -> None:
     await dut_hfp_ag_callback.wait_for_event(
-        callback_type=_HfpAgAudioStateChange,
-        predicate=lambda e: (
-            e.address == self.ref.address and e.state == state
-        ),
+        event=_HfpAgAudioStateChange(address=self.ref.address, state=state),
     )
 
   async def _wait_for_sco_available(
@@ -120,7 +117,7 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
       dut_audio_callback: _CallbackHandler,
   ) -> None:
     await dut_audio_callback.wait_for_event(
-        callback_type=bl4a_api.AudioDeviceAdded,
+        event=bl4a_api.AudioDeviceAdded,
         predicate=lambda e: (
             e.address == self.ref.address
             and e.device_type == android_constants.AudioDeviceType.BLUETOOTH_SCO
@@ -224,8 +221,10 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
       await self.classic_connect_and_pair()
       self.logger.info("[DUT] Wait for A2DP connected.")
       await dut_cb_a2dp.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: (e.state == _ConnectionState.CONNECTED),
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.CONNECTED,
+          ),
       )
       self.logger.info("[DUT] Wait for HFP connected.")
       await self._wait_for_hfp_state(dut_cb_hfp, _ConnectionState.CONNECTED)
@@ -319,8 +318,10 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
 
     self.logger.info("[DUT] Wait for A2DP connected.")
     await dut_a2dp_cb.wait_for_event(
-        bl4a_api.ProfileConnectionStateChanged,
-        lambda e: (e.state == _ConnectionState.CONNECTED),
+        bl4a_api.ProfileConnectionStateChanged(
+            address=self.ref.address,
+            state=android_constants.ConnectionState.CONNECTED,
+        ),
     )
     self.logger.info("[DUT] Wait for HFP connected.")
     await self._wait_for_hfp_state(dut_hfp_cb, _ConnectionState.CONNECTED)
@@ -331,8 +332,9 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
 
     self.logger.info("[DUT] Check A2DP is playing.")
     await dut_a2dp_cb.wait_for_event(
-        bl4a_api.A2dpPlayingStateChanged,
-        lambda e: (e.state == android_constants.A2dpState.PLAYING),
+        bl4a_api.A2dpPlayingStateChanged(
+            address=self.ref.address, state=android_constants.A2dpState.PLAYING
+        ),
     )
 
     self.logger.info("[DUT] Wait for SCO device available.")
@@ -353,16 +355,17 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
     with call:
       self.logger.info("[DUT] Check A2DP is not playing.")
       await dut_a2dp_cb.wait_for_event(
-          bl4a_api.A2dpPlayingStateChanged,
-          lambda e: (e.state == android_constants.A2dpState.NOT_PLAYING),
+          bl4a_api.A2dpPlayingStateChanged(
+              address=self.ref.address,
+              state=android_constants.A2dpState.NOT_PLAYING,
+          ),
       )
       self.logger.info("[DUT] Wait for SCO connected.")
       await self._wait_for_sco_state(dut_hfp_cb, _ScoState.CONNECTED)
       if handle_audio_focus:
         self.logger.info("[DUT] Wait for player paused.")
         await dut_player_cb.wait_for_event(
-            bl4a_api.PlayerIsPlayingChanged,
-            lambda e: (not cast(bl4a_api.PlayerIsPlayingChanged, e).is_playing),
+            bl4a_api.PlayerIsPlayingChanged(is_playing=False),
         )
 
       async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
@@ -383,14 +386,14 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
 
     self.logger.info("[DUT] Wait for A2DP resume.")
     await dut_a2dp_cb.wait_for_event(
-        bl4a_api.A2dpPlayingStateChanged,
-        lambda e: (e.state == android_constants.A2dpState.PLAYING),
+        bl4a_api.A2dpPlayingStateChanged(
+            address=self.ref.address, state=android_constants.A2dpState.PLAYING
+        ),
     )
     if handle_audio_focus:
       self.logger.info("[DUT] Wait for player resumed.")
       await dut_player_cb.wait_for_event(
-          bl4a_api.PlayerIsPlayingChanged,
-          lambda e: (cast(bl4a_api.PlayerIsPlayingChanged, e).is_playing),
+          bl4a_api.PlayerIsPlayingChanged(is_playing=True),
       )
 
 

@@ -88,15 +88,22 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
     self.ref_hfp_protocol_queue = asyncio.Queue()
     self.ref_hfp_protocols.clear()
 
+  @override
+  async def async_teardown_test(self) -> None:
+    await super().async_teardown_test()
+    # Make sure Bumble is off to cancel any running tasks.
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      await self.ref.close()
+
   async def _wait_for_hfp_state(
       self,
       dut_hfp_ag_callback: _CallbackHandler,
       state: _ConnectionState,
   ) -> None:
     await dut_hfp_ag_callback.wait_for_event(
-        callback_type=bl4a_api.ProfileConnectionStateChanged,
-        predicate=lambda e: (
-            e.address == str(self.ref.address) and e.state == state
+        bl4a_api.ProfileConnectionStateChanged(
+            address=self.ref.address,
+            state=state,
         ),
         timeout=datetime.timedelta(seconds=10),
     )
@@ -107,10 +114,7 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       state: _ScoState,
   ) -> None:
     await dut_hfp_ag_callback.wait_for_event(
-        callback_type=_HfpAgAudioStateChange,
-        predicate=lambda e: (
-            e.address == str(self.ref.address) and e.state == state
-        ),
+        event=_HfpAgAudioStateChange(address=self.ref.address, state=state),
     )
 
   async def _wait_for_sco_available(
@@ -118,7 +122,7 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       dut_audio_callback: _CallbackHandler,
   ) -> None:
     await dut_audio_callback.wait_for_event(
-        callback_type=bl4a_api.AudioDeviceAdded,
+        event=bl4a_api.AudioDeviceAdded,
         predicate=lambda e: (
             # Since 25Q1, AudioManager may return annonymous address where only
             # the last 4 digits (+ 1 separator) are valid.
@@ -133,7 +137,7 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       *states,
   ) -> None:
     await dut_telecom_callback.wait_for_event(
-        callback_type=bl4a_api.CallStateChanged,
+        event=bl4a_api.CallStateChanged,
         predicate=lambda e: (e.state in states),
     )
 
@@ -197,8 +201,10 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       self.logger.info("[DUT] Terminate connection.")
       self.dut.bt.disconnect(self.ref.address)
       await dut_cb.wait_for_event(
-          bl4a_api.AclDisconnected,
-          lambda e: (e.address == self.ref.address),
+          bl4a_api.AclDisconnected(
+              address=self.ref.address,
+              transport=android_constants.Transport.CLASSIC,
+          ),
       )
 
   async def test_pair_and_connect(self) -> None:
@@ -813,11 +819,11 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
           await ref_hfp_protocol.execute_command(f"AT+VGS={expected_volume}")
 
           self.logger.info("[DUT] Wait for volume changed event.")
-          volume_changed_event = await dut_audio_cb.wait_for_event(
-              callback_type=bl4a_api.VolumeChanged,
-              predicate=lambda e: (e.stream_type == _STREAM_TYPE_CALL),
+          await dut_audio_cb.wait_for_event(
+              event=bl4a_api.VolumeChanged(
+                  stream_type=_STREAM_TYPE_CALL, volume_value=expected_volume
+              ),
           )
-          self.assertEqual(volume_changed_event.volume_value, expected_volume)
 
   async def test_query_call_status(self) -> None:
     """Tests querying call status from HF.

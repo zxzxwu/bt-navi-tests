@@ -74,6 +74,8 @@ uv pip install -e .
 
 #### Configure testbed
 
+NOTE: If you don't care the order, use testbed `any`, or let `test_runner` generate one.
+
 Modify the test config file `config.yml` as follows:
 
 * Find device serial numbers:
@@ -111,8 +113,16 @@ device is `localhost:40155` and `localhost:46879`.
 
 ### Run the test
 
-To run the test, run the following commands from the local directory:
+This test suite has been integrated with [Mobly Android Partner Tools](https://github.com/android/mobly-android-partner-tools/tree/main), so it can be run with
 
 ```bash
-python3 navi/tests/generic_functionality_suite.py -c config.yml
+test_runner generic_functionality_suite -c config.yml -tb default [--upload_results]
+```
+
+NOTE: If -c and -tb is not specified, Mobly test_runner will automatically select all devices with the order present in `adb devices`. Check `test_runner -h` for more details.
+
+Or you may run the following commands from the local directory:
+
+```bash
+python3 navi/tests/generic_functionality_suite.py -c config.yml -tb default
 ```

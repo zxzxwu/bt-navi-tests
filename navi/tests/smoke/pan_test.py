@@ -85,8 +85,10 @@ class PanTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for PANU connection.")
       await dut_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: e.state == android_constants.ConnectionState.CONNECTED,
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.CONNECTED,
+          ),
       )
 
       self.logger.info("[REF] Wait for Ethernet frame from DUT.")
@@ -129,8 +131,10 @@ class PanTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for PANU connection.")
       await dut_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: e.state == android_constants.ConnectionState.CONNECTED,
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.CONNECTED,
+          ),
       )
 
       self.logger.info("[REF] Wait for Ethernet frame from DUT.")

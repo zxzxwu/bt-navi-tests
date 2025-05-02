@@ -167,7 +167,7 @@ class GattServerTest(navi_test_base.TwoDevicesTestBase):
       read_task = asyncio.create_task(characteristic.read_value())
 
       read_request = await self.dut_gatt_server.wait_for_event(
-          callback_type=bl4a_api.GattCharacteristicReadRequest,
+          event=bl4a_api.GattCharacteristicReadRequest,
           predicate=lambda request: (
               request.characteristic_uuid == characteristic_uuid
           ),
@@ -226,7 +226,7 @@ class GattServerTest(navi_test_base.TwoDevicesTestBase):
       )
 
       write_request = await self.dut_gatt_server.wait_for_event(
-          callback_type=bl4a_api.GattCharacteristicWriteRequest,
+          event=bl4a_api.GattCharacteristicWriteRequest,
           predicate=lambda request: (
               request.characteristic_uuid == characteristic_uuid
           ),
@@ -298,7 +298,7 @@ class GattServerTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for CCCD write.")
       subscribe_request = await self.dut_gatt_server.wait_for_event(
-          callback_type=bl4a_api.GattDescriptorWriteRequest,
+          event=bl4a_api.GattDescriptorWriteRequest,
           predicate=lambda request: (
               request.characteristic_handle == dut_characteristic.handle
               and request.descriptor_uuid == _CCCD_UUID

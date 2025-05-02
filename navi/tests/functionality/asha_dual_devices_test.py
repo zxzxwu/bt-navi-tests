@@ -100,10 +100,9 @@ class AshaDualDevicesTest(navi_test_base.MultiDevicesTestBase):
             '[DUT] Wait for ASHA connected to %s', ref.random_address
         )
         await dut_cb.wait_for_event(
-            callback_type=bl4a_api.ProfileConnectionStateChanged,
-            predicate=lambda e: (
-                e.address == ref.random_address  # pylint: disable=cell-var-from-loop
-                and e.state == android_constants.ConnectionState.CONNECTED
+            bl4a_api.ProfileConnectionStateChanged(
+                address=ref.random_address,
+                state=android_constants.ConnectionState.CONNECTED,
             ),
         )
 
@@ -138,8 +137,9 @@ class AshaDualDevicesTest(navi_test_base.MultiDevicesTestBase):
           await acl.disconnect()
         self.logger.info('[DUT] Wait for ACL disconnected from %s', ref_address)
         await dut_cb.wait_for_event(
-            bl4a_api.AclDisconnected,
-            predicate=lambda e: (e.address == ref_address),  # pylint: disable=cell-var-from-loop
+            bl4a_api.AclDisconnected(
+                address=ref_address, transport=android_constants.Transport.LE
+            )
         )
 
     with self.dut.bl4a.register_callback(_Module.ASHA) as dut_cb:
@@ -157,10 +157,9 @@ class AshaDualDevicesTest(navi_test_base.MultiDevicesTestBase):
         else:
           self.logger.info('[DUT] Wait for ASHA connected to %s', ref_address)
           await dut_cb.wait_for_event(
-              callback_type=bl4a_api.ProfileConnectionStateChanged,
-              predicate=lambda e: (
-                  e.address == ref_address  # pylint: disable=cell-var-from-loop
-                  and e.state == android_constants.ConnectionState.CONNECTED
+              bl4a_api.ProfileConnectionStateChanged(
+                  address=ref_address,
+                  state=android_constants.ConnectionState.CONNECTED,
               ),
           )
 

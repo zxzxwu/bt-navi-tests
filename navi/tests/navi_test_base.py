@@ -48,6 +48,7 @@ from navi.utils import android_constants
 from navi.utils import bl4a_api
 from navi.utils import errors
 from navi.utils import logcat
+from navi.utils import matcher
 from navi.utils import retry as retry_lib
 from navi.utils import snippet_stub
 
@@ -802,8 +803,9 @@ class AndroidBumbleTestBase(BaseTestBase):
           self.logger.info("[DUT] Already in bonding state, cancelling.")
           self.assertTrue(self.dut.bt.cancelBond(ref.address))
           await dut_cb.wait_for_event(
-              bl4a_api.BondStateChanged,
-              lambda e: (e.state == android_constants.BondState.NONE),
+              bl4a_api.BondStateChanged(
+                  address=ref.address, state=android_constants.BondState.NONE
+              ),
               timeout=_SETUP_TIMEOUT_SECONDS,
           )
 
@@ -816,16 +818,19 @@ class AndroidBumbleTestBase(BaseTestBase):
       )
       self.logger.info("[DUT] Wait for pairing request.")
       await dut_cb.wait_for_event(
-          bl4a_api.PairingRequest,
-          lambda e: (e.address == ref.address),
+          bl4a_api.PairingRequest(
+              address=ref.address, variant=matcher.ANY, pin=matcher.ANY
+          ),
           timeout=_SETUP_TIMEOUT_SECONDS,
       )
       self.assertTrue(self.dut.bt.setPairingConfirmation(ref.address, True))
       self.logger.info("[DUT] Wait for bond state change.")
       BondState: TypeAlias = android_constants.BondState
       pairing_complete_event = await dut_cb.wait_for_event(
-          bl4a_api.BondStateChanged,
-          lambda e: (e.state in (BondState.BONDED, BondState.NONE)),
+          bl4a_api.BondStateChanged(
+              address=ref.address,
+              state=matcher.any_of(BondState.BONDED, BondState.NONE),
+          ),
           timeout=_SETUP_TIMEOUT_SECONDS,
       )
       self.assertEqual(pairing_complete_event.state, BondState.BONDED)
@@ -884,8 +889,9 @@ class AndroidBumbleTestBase(BaseTestBase):
           self.logger.info("[DUT] Already in bonding state, cancelling.")
           self.assertTrue(self.dut.bt.cancelBond(ref_addr))
           await dut_cb.wait_for_event(
-              bl4a_api.BondStateChanged,
-              lambda e: (e.state == android_constants.BondState.NONE),
+              bl4a_api.BondStateChanged(
+                  address=ref_addr, state=android_constants.BondState.NONE
+              ),
               timeout=_SETUP_TIMEOUT_SECONDS,
           )
 
@@ -911,8 +917,9 @@ class AndroidBumbleTestBase(BaseTestBase):
       )
       self.logger.info("[DUT] Wait for pairing request.")
       await dut_cb.wait_for_event(
-          bl4a_api.PairingRequest,
-          lambda e: (e.address == ref_addr),
+          bl4a_api.PairingRequest(
+              address=ref_addr, variant=matcher.ANY, pin=matcher.ANY
+          ),
           timeout=_SETUP_TIMEOUT_SECONDS,
       )
 
@@ -920,8 +927,10 @@ class AndroidBumbleTestBase(BaseTestBase):
       self.logger.info("[DUT] Wait for bond state change.")
       BondState: TypeAlias = android_constants.BondState
       pairing_complete_event = await dut_cb.wait_for_event(
-          bl4a_api.BondStateChanged,
-          lambda e: (e.state in (BondState.NONE, BondState.BONDED)),
+          bl4a_api.BondStateChanged(
+              address=ref_addr,
+              state=matcher.any_of(BondState.BONDED, BondState.NONE),
+          ),
           timeout=_SETUP_TIMEOUT_SECONDS,
       )
       self.assertEqual(pairing_complete_event.state, BondState.BONDED)

@@ -153,14 +153,15 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
       auth_task = asyncio.tasks.create_task(ref_dut.authenticate())
       self.logger.info('[DUT] Wait for incoming connection.')
       await dut_cb.wait_for_event(
-          callback_type=bl4a_api.AclConnected,
-          predicate=lambda e: (e.address == ref_addr),
+          event=bl4a_api.AclConnected(
+              address=ref_addr, transport=android_constants.Transport.CLASSIC
+          ),
           timeout=_DEFAULT_STEP_TIMEOUT,
       )
 
     self.logger.info('[DUT] Wait for pairing request.')
     dut_pairing_event = await dut_cb.wait_for_event(
-        callback_type=bl4a_api.PairingRequest,
+        event=bl4a_api.PairingRequest,
         predicate=lambda e: (e.address == ref_addr),
         timeout=_DEFAULT_STEP_TIMEOUT,
     )
@@ -230,7 +231,7 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
     )
     actual_state = (
         await dut_cb.wait_for_event(
-            callback_type=bl4a_api.BondStateChanged,
+            event=bl4a_api.BondStateChanged,
             predicate=lambda e: (e.state in _TERMINATED_BOND_STATES),
             timeout=_DEFAULT_STEP_TIMEOUT,
         )
@@ -538,8 +539,9 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
     auth_task = asyncio.tasks.create_task(ref_dut.authenticate())
     self.logger.info('[DUT] Wait for incoming connection.')
     await dut_cb.wait_for_event(
-        callback_type=bl4a_api.AclConnected,
-        predicate=lambda e: (e.address == ref_addr),
+        event=bl4a_api.AclConnected(
+            address=ref_addr, transport=android_constants.Transport.CLASSIC
+        ),
         timeout=_DEFAULT_STEP_TIMEOUT,
     )
 
@@ -556,7 +558,7 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
 
     self.logger.info('[DUT] Wait for pairing request.')
     dut_pairing_request = await dut_cb.wait_for_event(
-        callback_type=bl4a_api.PairingRequest,
+        event=bl4a_api.PairingRequest,
         predicate=lambda e: (e.address == ref_addr),
         timeout=_DEFAULT_STEP_TIMEOUT,
     )
@@ -568,7 +570,7 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
     self.logger.info('[DUT] Check final state.')
     actual_state = (
         await dut_cb.wait_for_event(
-            callback_type=bl4a_api.BondStateChanged,
+            event=bl4a_api.BondStateChanged,
             predicate=lambda e: (e.state in _TERMINATED_BOND_STATES),
             timeout=_DEFAULT_STEP_TIMEOUT,
         )
@@ -634,7 +636,7 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
     self.logger.info('[DUT] Search for REF to update CoD.')
     self.dut.bt.startInquiry()
     await dut_cb.wait_for_event(
-        callback_type=bl4a_api.DeviceFound,
+        event=bl4a_api.DeviceFound,
         predicate=lambda e: (e.address == ref_addr),
         timeout=_DEFAULT_STEP_TIMEOUT,
     )
@@ -647,7 +649,7 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
     if not auto_pair:
       self.logger.info('[DUT] Wait for pairing request.')
       dut_pairing_request = await dut_cb.wait_for_event(
-          callback_type=bl4a_api.PairingRequest,
+          event=bl4a_api.PairingRequest,
           predicate=lambda e: (e.address == ref_addr),
           timeout=_DEFAULT_STEP_TIMEOUT,
       )
@@ -670,7 +672,7 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
     self.logger.info('[DUT] Check final state.')
     actual_state = (
         await dut_cb.wait_for_event(
-            callback_type=bl4a_api.BondStateChanged,
+            event=bl4a_api.BondStateChanged,
             predicate=lambda e: (e.state in _TERMINATED_BOND_STATES),
             timeout=_DEFAULT_STEP_TIMEOUT,
         )

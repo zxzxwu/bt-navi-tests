@@ -120,7 +120,10 @@ class MapTest(navi_test_base.TwoDevicesTestBase):
           self.ref.address, android_constants.BluetoothAccessPermission.ALLOWED
       )
       await dut_cb.wait_for_event(
-          bl4a_api.AclDisconnected, lambda e: e.address == self.ref.address
+          bl4a_api.AclDisconnected(
+              address=self.ref.address,
+              transport=android_constants.Transport.CLASSIC,
+          ),
       )
 
   @override
@@ -166,8 +169,10 @@ class MapTest(navi_test_base.TwoDevicesTestBase):
         self.fail('Failed to get connection ID from connect response.')
       self.logger.info('[DUT] Wait for profile connected.')
       await dut_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: e.state == android_constants.ConnectionState.CONNECTED,
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.CONNECTED,
+          ),
       )
     return client, connection_id
 
@@ -225,8 +230,10 @@ class MapTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info('[REF] Wait for profile disconnected.')
       await dut_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: e.state == android_constants.ConnectionState.DISCONNECTED,
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.DISCONNECTED,
+          ),
       )
 
   @navi_test_base.parameterized(

@@ -74,10 +74,9 @@ class AshaTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for ASHA connected.")
       await dut_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: (
-              e.state == android_constants.ConnectionState.CONNECTED
-              and e.address == self.ref.random_address
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.random_address,
+              state=android_constants.ConnectionState.CONNECTED,
           ),
       )
 
@@ -139,10 +138,9 @@ class AshaTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for ASHA connected.")
       await dut_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: (
-              e.state == android_constants.ConnectionState.CONNECTED
-              and e.address == self.ref.random_address
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.random_address,
+              state=android_constants.ConnectionState.CONNECTED,
           ),
       )
 

@@ -200,7 +200,7 @@ class CallbackHandler:
 
   async def wait_for_event(
       self,
-      callback_type: type[_EVENT],
+      event: type[_EVENT] | _EVENT,
       predicate: Callable[[_EVENT], bool] | None = None,
       timeout: datetime.timedelta | float = _DEFAULT_CALLBACK_TIMEOUT_SECONDS,
       timeout_msg: str | None = None,
@@ -208,9 +208,10 @@ class CallbackHandler:
     """Waits for a callback event that satisfies the predicate.
 
     Args:
-      callback_type: type of callback.
+      event: type of callback event, or an event instance to be matched.
       predicate: a function that takes a callback event metadata and returns a
-        bool. If None is given, returns the first one.
+        bool. If None is given, returns the first one. When event is an instance
+        of JsonDeserializableEvent, predicate will be ignored.
       timeout: timeout to wait for the expected event. If not present, wait for
         event for 30 seconds.
       timeout_msg: message to be shown when timeout.
@@ -225,34 +226,46 @@ class CallbackHandler:
 
     if isinstance(timeout, datetime.timedelta):
       timeout = timeout.total_seconds()
+    if isinstance(event, type):
+      if predicate:
+        match_msg = f' matching `{inspect.getsource(predicate).strip()}`'
+      else:
+        match_msg = ''
+      event_class = event
+    else:
+      match_msg = f' == {event}'
+      event_class = event.__class__
 
     try:
-      if predicate:
-        event = await asyncio.to_thread(
+      if not isinstance(event, type):
+        got = await asyncio.to_thread(
             lambda: self.handler.waitForEvent(
-                callback_type.EVENT_NAME,
-                lambda e: predicate(callback_type.from_mapping(e.data)),
+                event.EVENT_NAME,
+                lambda e: event.from_mapping(e.data) == event,
+                timeout=timeout,
+            )
+        )
+      elif predicate:
+        got = await asyncio.to_thread(
+            lambda: self.handler.waitForEvent(
+                event.EVENT_NAME,
+                lambda e: predicate(event.from_mapping(e.data)),
                 timeout=timeout,
             )
         )
       else:
-        event = await asyncio.to_thread(
-            lambda: self.handler.waitAndGet(callback_type.EVENT_NAME, timeout)
+        got = await asyncio.to_thread(
+            lambda: self.handler.waitAndGet(event.EVENT_NAME, timeout)
         )
     except mobly.snippet.errors.CallbackHandlerTimeoutError:
       raise errors.AsyncTimeoutError(
           timeout_msg
           or (
-              f'No event {callback_type.__name__}({callback_type.EVENT_NAME})'
-              + (
-                  f' matching `{inspect.getsource(predicate).strip()}`'
-                  if predicate
-                  else ''
-              )
+              f'No event {event_class.__name__}({event.EVENT_NAME}) {match_msg}'
               + f' is received within {timeout} seconds.'
           )
       ) from None
-    return callback_type.from_mapping(event.data)
+    return event.from_mapping(got.data)
 
   def get_all_events(self, callback_type: type[_EVENT]) -> list[_EVENT]:
     """Gets all posted callback events.

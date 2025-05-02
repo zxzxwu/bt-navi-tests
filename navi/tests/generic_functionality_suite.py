@@ -18,34 +18,25 @@ import inspect
 import pkgutil
 import importlib
 from mobly import base_test
-from mobly import base_suite
-from mobly import config_parser
 from mobly import suite_runner
-from typing_extensions import override
 
 from navi.tests import smoke
 from navi.tests import functionality
 
-
-class GenericTestSuite(base_suite.BaseSuite):
-    """Generic test suite for Bluetooth."""
-
-    @override
-    def setup_suite(self, config: config_parser.TestRunConfig) -> None:
-        del config  # Unused.
-
-        for module in (smoke, functionality):
-            for submodule_info in pkgutil.iter_modules(
-                module.__path__, prefix=module.__name__ + "."
+def main() -> None:
+    test_classes: list[base_test.BaseTestClass] = []
+    for module in (smoke, functionality):
+        for submodule_info in pkgutil.iter_modules(
+            module.__path__, prefix=module.__name__ + "."
+        ):
+            submodule = importlib.import_module(submodule_info.name)
+            for _, test_class in inspect.getmembers(
+                submodule,
+                lambda x: inspect.isclass(x)
+                and issubclass(x, base_test.BaseTestClass),
             ):
-                submodule = importlib.import_module(submodule_info.name)
-                for _, test_class in inspect.getmembers(
-                    submodule,
-                    lambda x: inspect.isclass(x)
-                    and issubclass(x, base_test.BaseTestClass),
-                ):
-                    self.add_test_class(test_class)
-
+                test_classes.append(test_class)
+    suite_runner.run_suite(test_classes)
 
 if __name__ == "__main__":
-    suite_runner.run_suite_class()
+    main()

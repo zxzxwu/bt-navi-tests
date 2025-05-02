@@ -17,7 +17,7 @@ from collections.abc import Sequence
 import contextlib
 import decimal
 import struct
-from typing import TypeAlias, cast
+from typing import TypeAlias
 
 from bumble import core
 from bumble import device
@@ -165,24 +165,23 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
     self.ref.device.add_service(self.ref_vcs)
 
   async def _prepare_paired_devices(self) -> None:
-    with (
-        self.dut.bl4a.register_callback(bl4a_api.Module.LE_AUDIO) as dut_lea_cb,
-        self.dut.bl4a.register_callback(bl4a_api.Module.AUDIO) as dut_audio_cb,
-    ):
+    with self.dut.bl4a.register_callback(
+        bl4a_api.Module.LE_AUDIO
+    ) as dut_lea_cb:
       self.logger.info("[DUT] Pair with REF")
       await self.le_connect_and_pair(ref_address_type=hci.OwnAddressType.RANDOM)
 
       self.logger.info("[DUT] Wait for LE Audio connected")
       event = await dut_lea_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: e.state == _ConnectionState.CONNECTED,
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.random_address,
+              state=android_constants.ConnectionState.CONNECTED,
+          ),
       )
       self.assertEqual(event.address, self.ref.random_address)
       self.logger.info("[DUT] Wait for audio route ready")
-      await dut_audio_cb.wait_for_event(
-          bl4a_api.AudioDeviceAdded,
-          lambda e: e.device_type
-          == android_constants.AudioDeviceType.BLE_HEADSET,
+      await dut_lea_cb.wait_for_event(
+          bl4a_api.ProfileActiveDeviceChanged(self.ref.random_address)
       )
 
   @override
@@ -250,8 +249,10 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for LE Audio disconnected")
       await dut_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: e.state == _ConnectionState.DISCONNECTED,
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.random_address,
+              state=android_constants.ConnectionState.DISCONNECTED,
+          ),
       )
 
       self.logger.info("[REF] Start advertising")
@@ -271,8 +272,10 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for LE Audio connected")
       await dut_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: e.state == _ConnectionState.CONNECTED,
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.random_address,
+              state=android_constants.ConnectionState.CONNECTED,
+          ),
       )
 
   async def test_unidirectional_audio_stream(self) -> None:
@@ -386,8 +389,10 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for LE Audio disconnected")
       await dut_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: e.state == _ConnectionState.DISCONNECTED,
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.random_address,
+              state=android_constants.ConnectionState.DISCONNECTED,
+          ),
       )
 
     with contextlib.ExitStack() as stack:
@@ -423,8 +428,10 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
         )
       self.logger.info("[DUT] Wait for LE Audio connected")
       await dut_leaudio_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: e.state == _ConnectionState.CONNECTED,
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.random_address,
+              state=android_constants.ConnectionState.CONNECTED,
+          ),
       )
 
       self.logger.info("[REF] Wait for streaming to start")
@@ -503,7 +510,9 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
     # When the flag is enabled, DUT's volume will be applied to REF.
     if self.dut.bluetooth_flags.get("vcp_device_volume_api_improvements", True):
       vcs_volume = pyee_extensions.EventTriggeredValueObserver[int](
-          self.ref_vcs, "volume_state", lambda: self.ref_vcs.volume_setting
+          self.ref_vcs,
+          "volume_state_change",
+          lambda: self.ref_vcs.volume_setting,
       )
       ref_expected_volume = decimal.Decimal(
           self.dut.bt.getVolume(_StreamType.MUSIC)
@@ -528,11 +537,12 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
       ):
         if self.dut.bt.getVolume(_StreamType.MUSIC) != dut_expected_volume:
           self.logger.info("[DUT] Wait for volume to be synced with REF")
-          event = await dut_audio_cb.wait_for_event(
-              callback_type=bl4a_api.VolumeChanged,
-              predicate=lambda e: e.stream_type == _StreamType.MUSIC,
+          await dut_audio_cb.wait_for_event(
+              event=bl4a_api.VolumeChanged(
+                  stream_type=_StreamType.MUSIC,
+                  volume_value=int(dut_expected_volume),
+              ),
           )
-          self.assertEqual(event.volume_value, dut_expected_volume)
 
   @navi_test_base.parameterized(_TestRole.DUT, _TestRole.REF)
   async def test_set_volume(self, issuer: _TestRole) -> None:
@@ -583,10 +593,9 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
         self.ref_vcs.volume_setting = ref_expected_volume
         await self.ref.device.notify_subscribers(self.ref_vcs.volume_state)
         await dut_audio_cb.wait_for_event(
-            callback_type=bl4a_api.VolumeChanged,
-            predicate=lambda e: (
-                e.stream_type == _StreamType.MUSIC
-                and e.volume_value == dut_expected_volume
+            event=bl4a_api.VolumeChanged(
+                stream_type=_StreamType.MUSIC,
+                volume_value=int(dut_expected_volume),
             ),
         )
 
@@ -947,7 +956,7 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for call to be active")
       await dut_telecom_cb.wait_for_event(
-          callback_type=bl4a_api.CallStateChanged,
+          event=bl4a_api.CallStateChanged,
           predicate=lambda e: e.state == _CallState.ACTIVE,
       )
 
@@ -959,7 +968,7 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for call to be disconnected")
       await dut_telecom_cb.wait_for_event(
-          callback_type=bl4a_api.CallStateChanged,
+          event=bl4a_api.CallStateChanged,
           predicate=lambda e: (e.state == _CallState.DISCONNECTED),
       )
 
@@ -1012,8 +1021,7 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for player paused.")
       await dut_player_cb.wait_for_event(
-          bl4a_api.PlayerIsPlayingChanged,
-          lambda e: (not (cast(bl4a_api.PlayerIsPlayingChanged, e).is_playing)),
+          bl4a_api.PlayerIsPlayingChanged(is_playing=False),
       )
 
 

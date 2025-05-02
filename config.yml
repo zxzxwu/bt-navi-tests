@@ -1,7 +1,7 @@
 {
   "TestBeds": [
     {
-      "Name": "Default",
+      "Name": "default",
       "Controllers": {
         # Put device serials shown in `adb devices`
         # Do not change the order!
@@ -19,6 +19,15 @@
             "label": "REF"
           }
         ]
+      },
+      "TestParams": {
+        "max_retry_count": 2
+      }
+    },
+    {
+      "Name": "any",
+      "Controllers": {
+        "AndroidDevice": "*"
       },
       "TestParams": {
         "max_retry_count": 2

@@ -18,7 +18,6 @@ import asyncio
 import enum
 import struct
 
-from bumble import device as bumble_device
 from bumble import gatt
 from bumble import hci
 from mobly import test_runner
@@ -236,13 +235,12 @@ class HogpTest(navi_test_base.TwoDevicesTestBase):
         bl4a_api.Module.HID_HOST
     ) as dut_hid_cb:
       self.logger.info("[DUT] Pair with REF")
-      await self.le_connect_and_pair(hci.OwnAddressType.PUBLIC)
+      await self.le_connect_and_pair(hci.OwnAddressType.RANDOM)
       self.logger.info("[DUT] Wait for HID connected")
       await dut_hid_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          predicate=lambda e: (
-              e.address == self.ref.address
-              and e.state == android_constants.ConnectionState.CONNECTED
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.random_address,
+              state=android_constants.ConnectionState.CONNECTED,
           ),
       )
 
@@ -269,16 +267,13 @@ class HogpTest(navi_test_base.TwoDevicesTestBase):
     ) as dut_hid_cb:
       self.logger.info("[REF] Restart advertising")
       await self.ref.device.start_advertising(
-          own_address_type=hci.OwnAddressType.PUBLIC,
-          target=hci.Address(f"{self.dut.address}/P"),
-          advertising_type=bumble_device.AdvertisingType.DIRECTED_CONNECTABLE_LOW_DUTY,
+          own_address_type=hci.OwnAddressType.RANDOM,
       )
       self.logger.info("[DUT] Wait for connected")
       await dut_hid_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          predicate=lambda e: (
-              e.address == self.ref.address
-              and e.state == android_constants.ConnectionState.CONNECTED
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.random_address,
+              state=android_constants.ConnectionState.CONNECTED,
           ),
       )
 

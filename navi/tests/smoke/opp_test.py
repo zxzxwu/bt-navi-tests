@@ -101,7 +101,10 @@ class OppTest(navi_test_base.TwoDevicesTestBase):
       # Wait for ACL disconnection (since there isn't any active profile, it
       # should be disconnected immediately).
       await dut_cb.wait_for_event(
-          bl4a_api.AclDisconnected, lambda e: e.address == self.ref.address
+          bl4a_api.AclDisconnected(
+              address=self.ref.address,
+              transport=android_constants.Transport.CLASSIC,
+          ),
       )
 
   @override

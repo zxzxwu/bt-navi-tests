@@ -83,8 +83,10 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
       self._setup_a2dp_device([_A2dpCodec.SBC])
       await self.classic_connect_and_pair()
       await dut_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: (e.state == android_constants.ConnectionState.CONNECTED),
+          bl4a_api.ProfileConnectionStateChanged(
+              self.ref.address,
+              state=android_constants.ConnectionState.CONNECTED,
+          )
       )
 
   async def _terminate_connection_from_ref(self) -> None:
@@ -98,8 +100,9 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
         return
       await ref_acl.disconnect()
       await dut_cb.wait_for_event(
-          bl4a_api.AclDisconnected,
-          lambda e: (e.address == self.ref.address),
+          bl4a_api.AclDisconnected(
+              self.ref.address, transport=android_constants.Transport.CLASSIC
+          ),
       )
 
   async def test_a2dp_connection_outgoing(self) -> None:
@@ -116,8 +119,7 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
             self.dut.bt.connect(self.ref.address)
             self.logger.info("[DUT] Wait for A2DP connected.")
             await dut_cb.wait_for_event(
-                bl4a_api.ProfileActiveDeviceChanged,
-                lambda e: (e.address == self.ref.address),
+                bl4a_api.ProfileActiveDeviceChanged(self.ref.address),
                 timeout=_DEFAULT_TIMEOUT_SECONDS,
             )
           latency_seconds = stop_watch.elapsed_time.total_seconds()

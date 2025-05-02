@@ -106,8 +106,10 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
     with self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER) as dut_cb:
       await dut_ref_acl.disconnect()
       await dut_cb.wait_for_event(
-          bl4a_api.AclDisconnected,
-          lambda e: (e.address == self.ref.address),
+          bl4a_api.AclDisconnected(
+              address=self.ref.address,
+              transport=android_constants.Transport.CLASSIC,
+          ),
       )
 
   async def _wait_for_hfp_state(
@@ -115,8 +117,10 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
   ) -> None:
     self.logger.info("[DUT] Wait for HFP state %s.", state)
     await dut_cb.wait_for_event(
-        bl4a_api.ProfileConnectionStateChanged,
-        lambda e: (e.address == self.ref.address and e.state == state),
+        bl4a_api.ProfileConnectionStateChanged(
+            address=self.ref.address,
+            state=state,
+        ),
     )
 
   def _setup_ag_device(self, configuration: hfp.AgConfiguration) -> None:
@@ -308,9 +312,8 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for SCO connected.")
       await dut_hfp_cb.wait_for_event(
-          bl4a_api.HfpHfAudioStateChanged,
-          lambda e: (
-              e.address == self.ref.address and e.state == _HfpState.CONNECTED
+          bl4a_api.HfpHfAudioStateChanged(
+              address=self.ref.address, state=_HfpState.CONNECTED
           ),
       )
 
@@ -321,10 +324,8 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for SCO disconnected.")
       await dut_hfp_cb.wait_for_event(
-          bl4a_api.HfpHfAudioStateChanged,
-          lambda e: (
-              e.address == self.ref.address
-              and e.state == _HfpState.DISCONNECTED
+          bl4a_api.HfpHfAudioStateChanged(
+              address=self.ref.address, state=_HfpState.DISCONNECTED
           ),
       )
 
@@ -398,10 +399,11 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
         ref_hfp_protocol.set_speaker_volume(expect_hfp_volume)
 
       self.logger.info("[DUT] Wait for volume changed.")
-      volume_changed_event = await dut_audio_cb.wait_for_event(
-          bl4a_api.VolumeChanged, lambda e: e.stream_type == _STREAM_TYPE_CALL
+      await dut_audio_cb.wait_for_event(
+          bl4a_api.VolumeChanged(
+              stream_type=_STREAM_TYPE_CALL, volume_value=expect_dut_volume
+          )
       )
-      self.assertEqual(volume_changed_event.volume_value, expect_dut_volume)
 
   async def test_update_battery_level(self) -> None:
     """Tests updating battery level indicator from HF.

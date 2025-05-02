@@ -87,14 +87,17 @@ class LeHostTest(navi_test_base.TwoDevicesTestBase):
           address_type=ref_address_type,
       )
       await dut_cb.wait_for_event(
-          bl4a_api.AclConnected,
-          predicate=lambda e: (e.address == ref_address),
+          event=bl4a_api.AclConnected(
+              address=ref_address, transport=android_constants.Transport.LE
+          ),
       )
       # [DUT] Disconnect GATT.
       await gatt_client.disconnect()
       await dut_cb.wait_for_event(
-          bl4a_api.AclDisconnected,
-          predicate=lambda e: (e.address == ref_address),
+          bl4a_api.AclDisconnected(
+              address=ref_address,
+              transport=android_constants.Transport.LE,
+          ),
       )
 
   @navi_test_base.retry(max_count=2)
@@ -126,16 +129,19 @@ class LeHostTest(navi_test_base.TwoDevicesTestBase):
 
       # [DUT] Wait for LE-ACL connected.
       await dut_cb.wait_for_event(
-          bl4a_api.AclConnected,
-          predicate=lambda e: e.address == self.ref.address,
+          event=bl4a_api.AclConnected(
+              address=self.ref.address, transport=android_constants.Transport.LE
+          ),
       )
 
       # [REF] Disconnect.
       await ref_dut_acl.disconnect()
       # [DUT] Wait for LE-ACL disconnected.
       await dut_cb.wait_for_event(
-          bl4a_api.AclDisconnected,
-          predicate=lambda e: e.address == self.ref.address,
+          bl4a_api.AclDisconnected(
+              address=self.ref.address,
+              transport=android_constants.Transport.LE,
+          ),
       )
 
   @navi_test_base.parameterized(

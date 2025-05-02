@@ -18,10 +18,14 @@ dependencies = [
     "snippet-uiautomator",
     "setuptools>=61.0.0",
     "numpy",
+    "mobly-android-partner-tools",
 ]
 
 [project.optional-dependencies]
 dev = ["mypy == 1.15.0"]
+
+[project.scripts]
+generic_functionality_suite = "navi.tests.generic_functionality_suite:main"
 
 [tool.setuptools]
 py-modules = ["_build"]

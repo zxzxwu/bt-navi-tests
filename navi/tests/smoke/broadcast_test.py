@@ -396,15 +396,17 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
       await self.le_connect_and_pair(hci.OwnAddressType.RANDOM)
       self.logger.info('[DUT] Wait for LE Audio connected')
       await dut_lea_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: e.address == self.ref.random_address
-          and e.state == android_constants.ConnectionState.CONNECTED,
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.random_address,
+              state=android_constants.ConnectionState.CONNECTED,
+          ),
       )
       self.logger.info('[DUT] Wait for BASS connected')
       await dut_bass_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: e.address == self.ref.random_address
-          and e.state == android_constants.ConnectionState.CONNECTED,
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.random_address,
+              state=android_constants.ConnectionState.CONNECTED,
+          ),
       )
 
   @navi_test_base.named_parameterized(

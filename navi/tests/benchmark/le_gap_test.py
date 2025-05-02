@@ -68,10 +68,7 @@ class LeGapTest(navi_test_base.TwoDevicesTestBase):
         await self.ref.reset()
       for transport in connected_on_transport:
         await dut_cb.wait_for_event(
-            bl4a_api.AclDisconnected,
-            lambda e: (
-                e.transport == transport and e.address == ref_address  # pylint: disable=cell-var-from-loop
-            ),
+            bl4a_api.AclDisconnected(ref_address, transport=transport)
         )
     # Leave a gap between tests.
     await asyncio.sleep(1.0)

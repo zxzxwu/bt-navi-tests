@@ -255,9 +255,8 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
 
       self.logger.info("[DUT] Wait for LE Audio connected")
       await dut_lea_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: (
-              e.address == ref_address and e.state == _ConnectionState.CONNECTED
+          bl4a_api.ProfileConnectionStateChanged(
+              address=ref_address, state=_ConnectionState.CONNECTED
           ),
           timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
       )
@@ -338,9 +337,9 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
       self.assertEqual(event.state, android_constants.BondState.BONDED)
       self.logger.info("[DUT] Wait for 2nd REF to be connected")
       await dut_lea_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          lambda e: e.address == ref_address
-          and e.state == _ConnectionState.CONNECTED,
+          bl4a_api.ProfileConnectionStateChanged(
+              address=ref_address, state=_ConnectionState.CONNECTED
+          ),
           timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
       )
 
@@ -477,8 +476,10 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
 
         self.logger.info("[DUT] Wait for disconnected")
         await dut_cb.wait_for_event(
-            bl4a_api.AclDisconnected,
-            lambda e: e.address == ref.random_address,  # pylint: disable=cell-var-from-loop
+            bl4a_api.AclDisconnected(
+                address=ref.random_address,
+                transport=android_constants.Transport.LE,
+            )
         )
 
     with self.dut.bl4a.register_callback(bl4a_api.Module.LE_AUDIO) as dut_cb:
@@ -506,9 +507,9 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
 
         self.logger.info("[DUT] Wait for LE Audio connected")
         await dut_cb.wait_for_event(
-            bl4a_api.ProfileConnectionStateChanged,
-            lambda e: e.state == _ConnectionState.CONNECTED
-            and e.address == ref.random_address,  # pylint: disable=cell-var-from-loop
+            bl4a_api.ProfileConnectionStateChanged(
+                address=ref.random_address, state=_ConnectionState.CONNECTED
+            ),
         )
 
     # Check if both devices are connected and active.
@@ -737,8 +738,10 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
         self.dut.bt.disconnect(ref.random_address)
         self.logger.info("[DUT] Wait for disconnected")
         await dut_cb.wait_for_event(
-            bl4a_api.AclDisconnected,
-            lambda e: e.address == ref.random_address,  # pylint: disable=cell-var-from-loop
+            bl4a_api.AclDisconnected(
+                address=ref.random_address,
+                transport=android_constants.Transport.LE,
+            )
         )
 
     sink_ase_states: list[pyee_extensions.EventTriggeredValueObserver] = []
@@ -877,10 +880,8 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
         if issuer == constants.TestRole.REF:
           self.logger.info("[DUT] Wait for volume to be set")
           await dut_audio_cb.wait_for_event(
-              bl4a_api.VolumeChanged,
-              lambda e: (
-                  e.stream_type == _StreamType.MUSIC
-                  and e.volume_value == dut_volume  # pylint: disable=cell-var-from-loop
+              bl4a_api.VolumeChanged(
+                  stream_type=_StreamType.MUSIC, volume_value=dut_volume
               ),
           )
 

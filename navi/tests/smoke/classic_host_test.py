@@ -47,14 +47,19 @@ class ClassicHostTest(navi_test_base.TwoDevicesTestBase):
           timeout=datetime.timedelta(seconds=15).total_seconds(),
       )
       await dut_cb.wait_for_event(
-          bl4a_api.AclConnected, lambda e: (e.address == self.ref.address)
+          bl4a_api.AclConnected(
+              address=self.ref.address,
+              transport=android_constants.Transport.CLASSIC,
+          ),
       )
       # disconnect() doesn't work, because it can only remove profile
       # connections.
       self.dut.bt.cancelBond(self.ref.address)
       await dut_cb.wait_for_event(
-          bl4a_api.AclDisconnected,
-          predicate=lambda e: (e.address == self.ref.address),
+          bl4a_api.AclDisconnected(
+              address=self.ref.address,
+              transport=android_constants.Transport.CLASSIC,
+          ),
           timeout=datetime.timedelta(seconds=30),
       )
 
@@ -74,12 +79,18 @@ class ClassicHostTest(navi_test_base.TwoDevicesTestBase):
       )
 
       await dut_cb.wait_for_event(
-          bl4a_api.AclConnected, lambda e: (e.address == self.ref.address)
+          bl4a_api.AclConnected(
+              address=self.ref.address,
+              transport=android_constants.Transport.CLASSIC,
+          ),
       )
 
       await ref_dut_acl.disconnect()
       await dut_cb.wait_for_event(
-          bl4a_api.AclDisconnected, lambda e: (e.address == self.ref.address)
+          bl4a_api.AclDisconnected(
+              address=self.ref.address,
+              transport=android_constants.Transport.CLASSIC,
+          ),
       )
 
   @navi_test_base.retry(max_count=2)

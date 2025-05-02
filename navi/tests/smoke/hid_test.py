@@ -80,10 +80,9 @@ class HidTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for HID connected")
       await dut_hid_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          predicate=lambda e: (
-              e.address == self.ref.address
-              and e.state == android_constants.ConnectionState.CONNECTED
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.CONNECTED,
           ),
       )
 
@@ -131,10 +130,9 @@ class HidTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for connected")
       await dut_hid_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged,
-          predicate=lambda e: (
-              e.address == self.ref.address
-              and e.state == android_constants.ConnectionState.CONNECTED
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.CONNECTED,
           ),
       )
 
