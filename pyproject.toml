@@ -18,7 +18,7 @@ dependencies = [
     "snippet-uiautomator",
     "setuptools>=61.0.0",
     "numpy",
-    "mobly-android-partner-tools",
+    "mobly-android-partner-tools >= 1.1.1",
 ]
 
 [project.optional-dependencies]

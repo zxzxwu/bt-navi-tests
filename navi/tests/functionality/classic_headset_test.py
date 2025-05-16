@@ -15,7 +15,6 @@
 """Tests when remote device supports both HFP and A2DP."""
 
 import asyncio
-import datetime
 from typing import TypeAlias
 
 from bumble import a2dp
@@ -46,10 +45,7 @@ _CALLER_NAME = "Pixel Bluetooth"
 _CALLER_NUMBER = "123456789"
 
 _AudioCodec = hfp.AudioCodec
-_ConnectionState = android_constants.ConnectionState
-_CallbackHandler: TypeAlias = bl4a_api.CallbackHandler
 _Module: TypeAlias = bl4a_api.Module
-_CallState = android_constants.CallState
 _ScoState = android_constants.ScoState
 _HfpAgAudioStateChange = bl4a_api.HfpAgAudioStateChanged
 
@@ -90,40 +86,6 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
     # Reset audio attributes.
     self.dut.bt.setAudioAttributes(None, False)
 
-  async def _wait_for_hfp_state(
-      self,
-      dut_hfp_ag_callback: _CallbackHandler,
-      state: _ConnectionState,
-  ) -> None:
-    await dut_hfp_ag_callback.wait_for_event(
-        bl4a_api.ProfileConnectionStateChanged(
-            address=self.ref.address,
-            state=state,
-        ),
-        timeout=datetime.timedelta(seconds=10),
-    )
-
-  async def _wait_for_sco_state(
-      self,
-      dut_hfp_ag_callback: _CallbackHandler,
-      state: _ScoState,
-  ) -> None:
-    await dut_hfp_ag_callback.wait_for_event(
-        event=_HfpAgAudioStateChange(address=self.ref.address, state=state),
-    )
-
-  async def _wait_for_sco_available(
-      self,
-      dut_audio_callback: _CallbackHandler,
-  ) -> None:
-    await dut_audio_callback.wait_for_event(
-        event=bl4a_api.AudioDeviceAdded,
-        predicate=lambda e: (
-            e.address == self.ref.address
-            and e.device_type == android_constants.AudioDeviceType.BLUETOOTH_SCO
-        ),
-    )
-
   @classmethod
   def _default_hfp_configuration(cls) -> hfp.HfConfiguration:
     return hfp.HfConfiguration(
@@ -139,7 +101,6 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
       self,
       hfp_configuration: hfp.HfConfiguration,
       a2dp_codecs: list[a2dp_ext.A2dpCodec],
-      auto_accept_sco: bool = True,
   ) -> None:
     """Setup HFP and A2DP servicer on the REF device."""
 
@@ -177,13 +138,6 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
             _AVRCP_TARGET_RECORD_HANDLE
         ),
     }
-    if auto_accept_sco:
-
-      def on_sco_request(connection: device.Connection, link_type: int) -> None:
-        del link_type
-        connection.abort_on("disconnection", self._accept_sco_request())
-
-      self.ref.device.on("sco_request", on_sco_request)
 
     def on_avdtp_connection(server: avdtp.Protocol) -> None:
       for codec in a2dp_codecs:
@@ -227,19 +181,9 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
           ),
       )
       self.logger.info("[DUT] Wait for HFP connected.")
-      await self._wait_for_hfp_state(dut_cb_hfp, _ConnectionState.CONNECTED)
-
-  async def _accept_sco_request(self) -> None:
-    """Accepts Bumble SCO request."""
-    if not self.ref_hfp_protocol:
-      self.fail("HFP protocol not setup.")
-    connection = self.ref_hfp_protocol.dlc.multiplexer.l2cap_channel.connection
-    await self.ref.device.send_command(
-        hci.HCI_Enhanced_Accept_Synchronous_Connection_Request_Command(
-            bd_addr=connection.peer_address,
-            **(await self.ref_hfp_protocol.get_esco_parameters()).asdict(),
-        )
-    )
+      await dut_cb_hfp.wait_for_event(
+          bl4a_api.ProfileActiveDeviceChanged(self.ref.address)
+      )
 
   @navi_test_base.named_parameterized(
       cvsd=dict(
@@ -303,15 +247,12 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
     self._setup_headset_device(
         hfp_configuration=hfp_configuration,
         a2dp_codecs=[a2dp_ext.A2dpCodec.SBC],
-        auto_accept_sco=True,
     )
 
     dut_hfp_cb = self.dut.bl4a.register_callback(_Module.HFP_AG)
     dut_a2dp_cb = self.dut.bl4a.register_callback(_Module.A2DP)
-    dut_audio_cb = self.dut.bl4a.register_callback(_Module.AUDIO)
-    self.close_after_test.append(dut_hfp_cb)
-    self.close_after_test.append(dut_a2dp_cb)
-    self.close_after_test.append(dut_audio_cb)
+    self.test_case_context.push(dut_hfp_cb)
+    self.test_case_context.push(dut_a2dp_cb)
 
     self.logger.info("[DUT] Connect and pair REF.")
     await self.classic_connect_and_pair()
@@ -324,7 +265,9 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
         ),
     )
     self.logger.info("[DUT] Wait for HFP connected.")
-    await self._wait_for_hfp_state(dut_hfp_cb, _ConnectionState.CONNECTED)
+    await dut_hfp_cb.wait_for_event(
+        bl4a_api.ProfileActiveDeviceChanged(self.ref.address)
+    )
 
     self.logger.info("[DUT] Start stream.")
     self.dut.bt.audioSetRepeat(android_constants.RepeatMode.ALL)
@@ -337,14 +280,11 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
         ),
     )
 
-    self.logger.info("[DUT] Wait for SCO device available.")
-    await self._wait_for_sco_available(dut_audio_cb)
-
     sco_links = asyncio.Queue[device.ScoLink]()
     self.ref.device.on("sco_connection", sco_links.put_nowait)
 
     dut_player_cb = self.dut.bl4a.register_callback(_Module.PLAYER)
-    self.close_after_test.append(dut_player_cb)
+    self.test_case_context.push(dut_player_cb)
 
     self.logger.info("[DUT] Add call.")
     call = self.dut.bl4a.make_phone_call(
@@ -361,7 +301,11 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
           ),
       )
       self.logger.info("[DUT] Wait for SCO connected.")
-      await self._wait_for_sco_state(dut_hfp_cb, _ScoState.CONNECTED)
+      await dut_hfp_cb.wait_for_event(
+          _HfpAgAudioStateChange(
+              address=self.ref.address, state=_ScoState.CONNECTED
+          ),
+      )
       if handle_audio_focus:
         self.logger.info("[DUT] Wait for player paused.")
         await dut_player_cb.wait_for_event(
@@ -379,7 +323,11 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
       call.close()
 
     self.logger.info("[DUT] Wait for SCO disconnected.")
-    await self._wait_for_sco_state(dut_hfp_cb, _ScoState.DISCONNECTED)
+    await dut_hfp_cb.wait_for_event(
+        _HfpAgAudioStateChange(
+            address=self.ref.address, state=_ScoState.DISCONNECTED
+        ),
+    )
     self.logger.info("[REF] Wait for SCO disconnected.")
     async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
       await sco_disconnected.wait()

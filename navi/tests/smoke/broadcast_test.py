@@ -15,9 +15,8 @@
 """Tests for LE Audio Broadcast and Broadcast Audio Scan Service (BASS)."""
 
 import asyncio
-import dataclasses
 import random
-from typing import Annotated, Protocol, cast
+from typing import Protocol, cast
 
 from bumble import core
 from bumble import device
@@ -32,7 +31,6 @@ from mobly import test_runner
 from mobly import signals
 from typing_extensions import override
 
-from navi.bumble_ext import hci as hci_ext
 from navi.tests import navi_test_base
 from navi.utils import android_constants
 from navi.utils import bl4a_api
@@ -58,23 +56,6 @@ class _LePeriodicAdvertisingSyncTransferReceivedEvent(Protocol):
   advertiser_phy: int
   periodic_advertising_interval: int
   advertiser_clock_accuracy: int
-
-
-# TODO: Remove this when Bumble command is synced to G3.
-@dataclasses.dataclass(frozen=True)
-class _LeSetDefaultPeriodicAdvertisingSyncTransferParametersCommand(
-    hci_ext.Command
-):
-  """See Bluetooth spec @ 7.8.92 LE Set Default Periodic Advertising Sync Transfer Parameters command."""
-
-  op_code = (  # type: ignore[misc]
-      hci.HCI_LE_SET_DEFAULT_PERIODIC_ADVERTISING_SYNC_TRANSFER_PARAMETERS_COMMAND
-  )
-
-  mode: Annotated[int, 1]
-  skip: Annotated[int, 2]
-  sync_timeout: Annotated[int, 2]
-  cte_type: Annotated[int, 1]
 
 
 def _make_basic_audio_announcement(
@@ -590,7 +571,7 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
           '[REF] Set default periodic advertising sync transfer parameters'
       )
       await self.ref.device.send_command(
-          _LeSetDefaultPeriodicAdvertisingSyncTransferParametersCommand(
+          hci.HCI_LE_Set_Default_Periodic_Advertising_Sync_Transfer_Parameters_Command(
               mode=0x03, skip=0x00, sync_timeout=0x4000, cte_type=0x00
           ),
           check_result=True,

@@ -122,7 +122,7 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
     )
 
     dut_cb = self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER)
-    self.close_after_test.append(dut_cb)
+    self.test_case_context.push(dut_cb)
     ref_addr = str(self.ref.address)
 
     ref_dut: device.Connection
@@ -509,7 +509,7 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
     """
 
     dut_cb = self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER)
-    self.close_after_test.append(dut_cb)
+    self.test_case_context.push(dut_cb)
     ref_addr = str(self.ref.address)
     pairing_delegate = pairing_utils.PairingDelegate(
         io_capability=_IoCapability.KEYBOARD_INPUT_ONLY,
@@ -602,7 +602,7 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
     """
 
     dut_cb = self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER)
-    self.close_after_test.append(dut_cb)
+    self.test_case_context.push(dut_cb)
     ref_addr = str(self.ref.address)
     pairing_delegate = pairing_utils.PairingDelegate(
         io_capability=_IoCapability.KEYBOARD_INPUT_ONLY,

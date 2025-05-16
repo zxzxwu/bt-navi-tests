@@ -148,7 +148,7 @@ class HidTest(navi_test_base.TwoDevicesTestBase):
     await self.test_connect()
 
     dut_input_cb = self.dut.bl4a.register_callback(bl4a_api.Module.INPUT)
-    self.close_after_test.append(dut_input_cb)
+    self.test_case_context.push(dut_input_cb)
 
     # Wait for the InputActivity to be ready.
     await asyncio.sleep(_PREPARE_INPUT_ACTIVITY_TIMEOUT_SECONDS)
@@ -163,9 +163,11 @@ class HidTest(navi_test_base.TwoDevicesTestBase):
           bytes([0x01, 0x00, 0x00, hid_key, 0x00, 0x00, 0x00, 0x00, 0x00])
       )
       self.logger.info("[DUT] Wait for key %s down", android_key_code.name)
-      event = await dut_input_cb.wait_for_event(bl4a_api.KeyEvent)
-      self.assertEqual(event.key_code, android_key_code)
-      self.assertEqual(event.action, android_constants.KeyAction.DOWN)
+      await dut_input_cb.wait_for_event(
+          bl4a_api.KeyEvent(
+              key_code=android_key_code, action=android_constants.KeyAction.DOWN
+          )
+      )
 
       self.logger.info("[REF] Release HID key %s", hid_key_code.name)
 
@@ -173,9 +175,11 @@ class HidTest(navi_test_base.TwoDevicesTestBase):
       self.ref_hid_device.send_data(
           bytes([0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
       )
-      event = await dut_input_cb.wait_for_event(bl4a_api.KeyEvent)
-      self.assertEqual(event.key_code, android_key_code)
-      self.assertEqual(event.action, android_constants.KeyAction.UP)
+      await dut_input_cb.wait_for_event(
+          bl4a_api.KeyEvent(
+              key_code=android_key_code, action=android_constants.KeyAction.UP
+          )
+      )
 
   async def test_mouse_click(self) -> None:
     """Tests the HID mouse click.
@@ -189,7 +193,7 @@ class HidTest(navi_test_base.TwoDevicesTestBase):
     await self.test_connect()
 
     dut_input_cb = self.dut.bl4a.register_callback(bl4a_api.Module.INPUT)
-    self.close_after_test.append(dut_input_cb)
+    self.test_case_context.push(dut_input_cb)
 
     # Wait for the InputActivity to be ready.
     await asyncio.sleep(_PREPARE_INPUT_ACTIVITY_TIMEOUT_SECONDS)
@@ -224,7 +228,7 @@ class HidTest(navi_test_base.TwoDevicesTestBase):
     await self.test_connect()
 
     dut_input_cb = self.dut.bl4a.register_callback(bl4a_api.Module.INPUT)
-    self.close_after_test.append(dut_input_cb)
+    self.test_case_context.push(dut_input_cb)
 
     # Wait for the InputActivity to be ready.
     await asyncio.sleep(_PREPARE_INPUT_ACTIVITY_TIMEOUT_SECONDS)

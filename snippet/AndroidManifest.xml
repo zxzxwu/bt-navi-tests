@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.google.wireless.android.pixel.bluetooth.snippet">
+
+  <uses-sdk
+      android:minSdkVersion="34"
+      android:targetSdkVersion="35" />
+
+  <uses-permission android:name="android.permission.INTERNET" />
+  <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+  <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+  <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+  <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+
+
+  <application>
+    <!-- Activity to listen Input -->
+    <activity
+        android:name="com.google.wireless.android.pixel.bluetooth.snippet.InputActivity"
+        android:configChanges="orientation|screenSize|keyboard|keyboardHidden"
+        android:exported="false">
+    </activity>
+    <provider
+        android:name="androidx.core.content.FileProvider"
+        android:authorities="com.google.wireless.android.pixel.bluetooth.snippet.FileProvider"
+        android:exported="false"
+        android:grantUriPermissions="true">
+      <meta-data
+          android:name="android.support.FILE_PROVIDER_PATHS"
+          android:resource="@xml/file_paths" />
+    </provider>
+
+    <meta-data
+        android:name="mobly-snippets"
+        android:testOnly="true"
+        android:value="com.google.android.mobly.snippet.uiautomator.ConfiguratorSnippet,
+                       com.google.android.mobly.snippet.uiautomator.UiAutomationSnippet,
+                       com.google.android.mobly.snippet.uiautomator.UiDeviceSnippet,
+                       com.google.android.mobly.snippet.uiautomator.UiObject2Snippet,
+                       com.google.android.mobly.snippet.uiautomator.UiWatcherSnippet,
+                       com.google.wireless.android.pixel.bluetooth.snippet.AudioSnippet,
+                       com.google.wireless.android.pixel.bluetooth.snippet.BluetoothA2dpSnippet,
+                       com.google.wireless.android.pixel.bluetooth.snippet.BluetoothAdapterSnippet,
+                       com.google.wireless.android.pixel.bluetooth.snippet.BluetoothGattClientSnippet,
+                       com.google.wireless.android.pixel.bluetooth.snippet.BluetoothGattServerSnippet,
+                       com.google.wireless.android.pixel.bluetooth.snippet.BluetoothHfpAgSnippet,
+                       com.google.wireless.android.pixel.bluetooth.snippet.BluetoothHfpHfSnippet,
+                       com.google.wireless.android.pixel.bluetooth.snippet.BluetoothHidHostSnippet,
+                       com.google.wireless.android.pixel.bluetooth.snippet.BluetoothL2capSnippet,
+                       com.google.wireless.android.pixel.bluetooth.snippet.BluetoothLeAudioSnippet,
+                       com.google.wireless.android.pixel.bluetooth.snippet.BluetoothLeBroadcastSnippet,
+                       com.google.wireless.android.pixel.bluetooth.snippet.BluetoothLeBroadcastAssistantSnippet,
+                       com.google.wireless.android.pixel.bluetooth.snippet.BluetoothOppSnippet,
+                       com.google.wireless.android.pixel.bluetooth.snippet.BluetoothPanSnippet,
+                       com.google.wireless.android.pixel.bluetooth.snippet.BluetoothProfileSnippet,
+                       com.google.wireless.android.pixel.bluetooth.snippet.BluetoothRfcommSnippet,
+                       com.google.wireless.android.pixel.bluetooth.snippet.DistanceMeasurementSnippet,
+                       com.google.wireless.android.pixel.bluetooth.snippet.InputSnippet,
+                       com.google.wireless.android.pixel.bluetooth.snippet.TelecomSnippet" />
+    <service
+        android:name=".InCallServiceImpl"
+        android:exported="true"
+        android:permission="android.permission.BIND_INCALL_SERVICE">
+      <intent-filter>
+        <action android:name="android.telecom.InCallService" />
+      </intent-filter>
+
+      <meta-data
+          android:name="android.telecom.INCLUDE_EXTERNAL_CALLS"
+          android:value="true" />
+      <meta-data
+          android:name="android.telecom.INCLUDE_SELF_MANAGED_CALLS"
+          android:value="true" />
+    </service>
+    <meta-data
+        android:name="mobly-object-converter"
+        android:value="com.google.wireless.android.pixel.bluetooth.snippet.JsonObjectConverter" />
+  </application>
+  <instrumentation
+      android:name="com.google.android.mobly.snippet.SnippetRunner"
+      android:targetPackage="com.google.wireless.android.pixel.bluetooth.snippet" />
+</manifest>

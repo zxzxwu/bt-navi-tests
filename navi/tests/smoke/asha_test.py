@@ -74,10 +74,7 @@ class AshaTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for ASHA connected.")
       await dut_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged(
-              address=self.ref.random_address,
-              state=android_constants.ConnectionState.CONNECTED,
-          ),
+          bl4a_api.ProfileActiveDeviceChanged(address=self.ref.random_address),
       )
 
       # Emulator never reports audio device added.
@@ -138,10 +135,7 @@ class AshaTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Wait for ASHA connected.")
       await dut_cb.wait_for_event(
-          bl4a_api.ProfileConnectionStateChanged(
-              address=self.ref.random_address,
-              state=android_constants.ConnectionState.CONNECTED,
-          ),
+          bl4a_api.ProfileActiveDeviceChanged(address=self.ref.random_address),
       )
 
   @navi_test_base.parameterized(

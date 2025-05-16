@@ -41,14 +41,14 @@ class _HciPacket(hci.HCI_Packet):
   def from_parameters(cls: type[Self], parameters: bytes) -> Self:
     """Creates an HCI packet from the given parameters."""
     offset = cls.PARSE_OFFSET
-    values = []
+    values: dict[str, Any] = {}
     for field in dataclasses.fields(cls):
-      value, size = hci.HCI_Object.parse_field(
-          parameters, offset, field.type.__metadata__[0]  # type: ignore[union-attr]
-      )
+      if not (metadata := getattr(field.type, "__metadata__", None)):
+        continue
+      value, size = hci.HCI_Object.parse_field(parameters, offset, metadata[0])
       offset += size
-      values.append(value)
-    return cls(*values)
+      values[field.name] = value
+    return cls(**values)
 
   @property
   def name(self) -> str:
@@ -64,15 +64,16 @@ class _HciPacket(hci.HCI_Packet):
   @property
   def fields(self) -> list[tuple[str, Any]]:
     return [
-        (field.name, field.type.__metadata__[0])  # type: ignore[union-attr]
+        (field.name, field.type.__metadata__[0])
         for field in dataclasses.fields(self)
+        if hasattr(field.type, "__metadata__")
     ]
 
 
 class Command(_HciPacket, hci.HCI_Command):
   """Base extended HCI command."""
 
-  op_code: ClassVar[int]  # type: ignore[misc]
+  op_code: int
   return_parameters_fields: ClassVar[Sequence[tuple[str, Any]]] = ()
 
   @classmethod
@@ -80,6 +81,32 @@ class Command(_HciPacket, hci.HCI_Command):
     """Registers the Command with the HCI module."""
 
     hci.HCI_Command.command_classes[clazz.op_code] = clazz
+    return clazz
+
+
+class Event(_HciPacket, hci.HCI_Event):
+  """Base extended HCI Event."""
+
+  event_code: int
+
+  @classmethod
+  def register(cls: type[Self], clazz: type[_E]) -> type[_E]:
+    """Registers the Event with the HCI module."""
+
+    hci.HCI_Event.event_classes[clazz.event_code] = clazz
+    return clazz
+
+
+class LeMetaEvent(_HciPacket, hci.HCI_LE_Meta_Event):
+  """Base extended HCI Event."""
+
+  subevent_code: int
+
+  @classmethod
+  def register(cls: type[Self], clazz: type[_LEME]) -> type[_LEME]:
+    """Registers the Event with the HCI module."""
+
+    hci.HCI_LE_Meta_Event.subevent_classes[clazz.subevent_code] = clazz
     return clazz
 
 
@@ -97,5 +124,6 @@ class VendorEvent(_HciPacket, hci.HCI_Vendor_Event):
 
 
 _C = TypeVar("_C", bound=Command)
-
 _VE = TypeVar("_VE", bound=VendorEvent)
+_LEME = TypeVar("_LEME", bound=LeMetaEvent)
+_E = TypeVar("_E", bound=VendorEvent)

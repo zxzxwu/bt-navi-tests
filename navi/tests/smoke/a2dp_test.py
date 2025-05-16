@@ -20,6 +20,7 @@ import enum
 import functools
 import tempfile
 from typing import Iterable, TypeAlias
+import wave
 
 from bumble import a2dp
 from bumble import avc
@@ -30,8 +31,6 @@ import bumble.core
 import bumble.utils
 from mobly import test_runner
 from mobly import signals
-import pydub
-import pydub.generators
 from typing_extensions import override
 
 from navi.bumble_ext import a2dp as a2dp_ext
@@ -613,8 +612,11 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
     self.dut.bt.audioSetRepeat(android_constants.RepeatMode.ONE)
     # Generate a sine wave audio file, and push it to DUT twice.
     with tempfile.NamedTemporaryFile() as local_file:
-      audio_segment = pydub.generators.Sine(freq=440).to_audio_segment()
-      audio_segment.export(local_file, format="mp3")
+      with wave.open(local_file.name, "wb") as wave_file:
+        wave_file.setnchannels(1)
+        wave_file.setsampwidth(2)
+        wave_file.setframerate(48000)
+        wave_file.writeframes(bytes(48000 * 2 * 5))  # 5 seconds.
       for i in range(2):
         self.dut.adb.push([
             local_file.name,

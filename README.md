@@ -50,6 +50,10 @@ This is a test suite for Bluetooth on Android devices.
     * Make sure that the installed binary is in the host's `PATH`, so it can
       be run directly with `adb` in the command line.
 
+  * FFmpeg
+
+    Some of cases need FFmpeg. Please download them from <https://ffmpeg.org/download.html> and add the binary to your PATH.
+
 ## Test steps
 
 Follow these steps to prepare and execute tests and review test results.
@@ -116,13 +120,27 @@ device is `localhost:40155` and `localhost:46879`.
 This test suite has been integrated with [Mobly Android Partner Tools](https://github.com/android/mobly-android-partner-tools/tree/main), so it can be run with
 
 ```bash
-test_runner generic_functionality_suite -c config.yml -tb default [--upload_results]
+test_runner generic_functionality_suite -c config.yml -tb default -i [-u]
 ```
 
 NOTE: If -c and -tb is not specified, Mobly test_runner will automatically select all devices with the order present in `adb devices`. Check `test_runner -h` for more details.
 
-Or you may run the following commands from the local directory:
+Or you may run the following commands from the local directory, but you need to manually install `bluetooth_snippet.apk` before running the test:
 
 ```bash
 python3 navi/tests/generic_functionality_suite.py -c config.yml -tb default
+```
+
+### Upload test results
+
+After running the test, Mobly should generate a log directory like:
+
+```log
+Artifacts are saved in "/tmp/logs/mobly/..."
+```
+
+If you have partner GCP account, you can upload the test result to GCP with results_uploader:
+
+```bash
+results_uploader /tmp/logs/mobly/...
 ```

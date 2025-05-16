@@ -102,7 +102,7 @@ class LePairingTest(navi_test_base.TwoDevicesTestBase):
             address_type=ref_connection_address_type,
             transport=android_constants.Transport.LE,
         )
-        self.close_after_test.append(gatt_client)
+        self.test_case_context.push(gatt_client)
 
       async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
         ref_dut_connection = await ref_dut_connection_future
@@ -256,7 +256,7 @@ class LePairingTest(navi_test_base.TwoDevicesTestBase):
     self.ref.device.pairing_config_factory = pairing_config_factory
 
     dut_cb = self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER)
-    self.close_after_test.append(dut_cb)
+    self.test_case_context.push(dut_cb)
     ref_addr = str(
         self.ref.random_address
         if ref_connection_address_type == _AddressType.RANDOM
@@ -472,7 +472,7 @@ class LePairingTest(navi_test_base.TwoDevicesTestBase):
     self.ref.device.pairing_config_factory = pairing_config_factory
 
     dut_cb = self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER)
-    self.close_after_test.append(dut_cb)
+    self.test_case_context.push(dut_cb)
     ref_addr = self.ref.random_address
 
     need_double_confirmation = (

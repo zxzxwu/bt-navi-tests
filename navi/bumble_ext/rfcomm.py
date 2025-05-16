@@ -27,6 +27,25 @@ _logger = rfcomm.logger
 DLC: TypeAlias = rfcomm.DLC
 
 
+def get_rfcomm_server(device: bumble_device.Device) -> rfcomm.Server | None:
+  """Returns the RFCOMM server from the device.
+
+  Args:
+    device: The Bumble device to get the RFCOMM server from.
+
+  Returns:
+    The RFCOMM server from the device, or None if not found.
+  """
+  if (
+      (server := device.l2cap_channel_manager.servers.get(rfcomm.RFCOMM_PSM))
+      and server.handler
+      and (obj := getattr(server.handler, '__self__', None))
+      and isinstance(obj, rfcomm.Server)
+  ):
+    return obj
+  return None
+
+
 class Multiplexer(rfcomm.Multiplexer):
   """Multiplexer for RFCOMM."""
 

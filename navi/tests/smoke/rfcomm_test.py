@@ -13,6 +13,7 @@
 #  limitations under the License.
 
 import asyncio
+import contextlib
 import datetime
 import enum
 import uuid
@@ -80,8 +81,11 @@ class RfcommTest(navi_test_base.TwoDevicesTestBase):
 
     # Terminate ACL connection after pairing.
     with self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER) as dut_cb:
+      # Disconnection may "fail" if the ACL is already disconnecting or
+      # disconnected.
+      with contextlib.suppress(core.BaseBumbleError):
+        await ref_dut_acl.disconnect()
       self.logger.info("[DUT] Wait for disconnected.")
-      await ref_dut_acl.disconnect()
       await dut_cb.wait_for_event(bl4a_api.AclDisconnected)
 
     # Wait for 2 seconds to let controllers become idle.

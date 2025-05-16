@@ -32,6 +32,19 @@
       "TestParams": {
         "max_retry_count": 2
       }
+    },
+    {
+      "Name": "emulator",
+      "Controllers": {
+        "AndroidDevice": "*"
+      },
+      "TestParams": {
+        "crown_driver": "passthrough",
+        "crown_driver_specs": [
+          "tcp-client:127.0.0.1:7300",
+          "tcp-client:127.0.0.1:7300",
+        ]
+      }
     }
   ]
 }

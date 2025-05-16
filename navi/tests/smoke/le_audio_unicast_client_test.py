@@ -328,7 +328,7 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
       6. Wait for audio streaming to stop from REF.
     """
     dut_telecom_cb = self.dut.bl4a.register_callback(bl4a_api.Module.TELECOM)
-    self.close_after_test.append(dut_telecom_cb)
+    self.test_case_context.push(dut_telecom_cb)
     call = self.dut.bl4a.make_phone_call(
         _CALLER_NAME,
         _CALLER_NUMBER,

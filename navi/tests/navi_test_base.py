@@ -18,19 +18,21 @@ import asyncio
 from collections.abc import AsyncGenerator, Callable, Coroutine, Sequence
 import contextlib
 import dataclasses
+import enum
 import functools
 import inspect
 import logging
 import pathlib
 import re
 import secrets
-from typing import Any, ClassVar, Never, Protocol, TypeAlias, cast, final
+from typing import Any, ClassVar, Never, TypeAlias, cast, final
 
 from absl.testing import absltest
 from bumble import pairing
 import bumble.core
 import bumble.device
 import bumble.hci
+import grpc.aio
 from mobly import base_test
 from mobly import records
 from mobly import runtime_test_info
@@ -41,7 +43,6 @@ from mobly.controllers.android_device_lib import apk_utils
 from snippet_uiautomator import uiautomator
 from typing_extensions import override
 
-from navi.utils import resources
 from navi.bumble_ext import crown
 from navi.utils import adb_snippets
 from navi.utils import android_constants
@@ -53,11 +54,14 @@ from navi.utils import retry as retry_lib
 from navi.utils import snippet_stub
 
 _NAVI_PARAMETERIZED = "_NAVI_PARAMETERIZED"
-_SNIPPET_PATH = "navi/bluetooth_snippet.apk"
-_SNIPPET_APK_PATH = resources.GetResourceFilename(_SNIPPET_PATH)
 _SETUP_TIMEOUT_SECONDS = 10.0
 # 100 * 0.625ms = 62.5ms
 _DEFAULT_ADVERTISING_INTERVAL = 100
+
+
+class CrownDriver(enum.StrEnum):
+  ANDROID = "android"
+  PASSTHROUGH = "passthrough"
 
 
 @dataclasses.dataclass
@@ -86,8 +90,6 @@ class AndroidSnippetDeviceWrapper:
     adb_snippets.enable_btsnoop(self.device)
     # Enable BT verbose logging.
     self.adb.shell("setprop persist.log.tag.bluetooth VERBOSE")
-    # Install Bluetooth Snippet.
-    apk_utils.install(self.device, _SNIPPET_APK_PATH)
     # Load Bluetooth Snippet.
     self.device.load_snippet(
         self._SNIPPET_NAME, android_constants.PACKAGE_NAME_BLUETOOTH_SNIPPET
@@ -352,12 +354,6 @@ def skip(reason: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
   return wrapper
 
 
-class SupportsClose(Protocol):
-
-  def close(self) -> None:
-    ...
-
-
 class BaseTestBase(base_test.BaseTestClass, absltest.TestCase):
   """Base class for all test base classes. Should not be used directly."""
 
@@ -372,7 +368,8 @@ class BaseTestBase(base_test.BaseTestClass, absltest.TestCase):
     super().__init__(*args, **kwargs)
     self.logger = logging.getLogger(__name__)
     self.loop = asyncio.new_event_loop()
-    self.close_after_test: list[SupportsClose] = []
+    self.test_case_context = contextlib.AsyncExitStack()
+    self.test_class_context = contextlib.AsyncExitStack()
 
   def _async_test_wrapper(
       self,
@@ -529,16 +526,14 @@ class BaseTestBase(base_test.BaseTestClass, absltest.TestCase):
 
   async def async_teardown_test(self) -> None:
     """Async test teardown stage called after each test, and teardown_test()."""
-    for closeable in self.close_after_test:
-      with contextlib.suppress(Exception):
-        await asyncio.to_thread(closeable.close)
-    self.close_after_test = []
+    await self.test_case_context.aclose()
 
   async def async_setup_class(self) -> None:
     """Async class setup stage called before all tests, and setup_class()."""
 
   async def async_teardown_class(self) -> None:
     """Async class teardown stage called after all tests, and teardown_class()."""
+    await self.test_class_context.aclose()
 
   @override
   def skipTest(self, reason: str) -> Never:
@@ -668,8 +663,8 @@ class AndroidBumbleTestBase(BaseTestBase):
           advertising_interval_max=_DEFAULT_ADVERTISING_INTERVAL,
       )
 
-    match cast(str, self.user_params.get("crown_driver", crown.Driver.ANDROID)):
-      case crown.Driver.ANDROID:
+    match cast(str, self.user_params.get("crown_driver", CrownDriver.ANDROID)):
+      case CrownDriver.ANDROID:
         controllers = self._get_android_controllers(self.NUM_REF_DEVICES + 1)
         self.dut = self.dut_wrapper_factory(controllers[0])
         self._refs = [
@@ -679,7 +674,7 @@ class AndroidBumbleTestBase(BaseTestBase):
             )
             for controller in controllers[1:]
         ]
-      case crown.Driver.PASSTHROUGH:
+      case CrownDriver.PASSTHROUGH:
         controllers = self._get_android_controllers(1)
         self.dut = self.dut_wrapper_factory(controllers[0])
         self._refs = [
@@ -708,6 +703,16 @@ class AndroidBumbleTestBase(BaseTestBase):
                 "bt_fw_version": self.dut.firmware_version,
                 "bt_prebuilt_version": self.dut.bluetooth_prebuilt_version,
             },
+        )
+    )
+    # Record suite name and manufacturer/model data to suite-level properties.
+    manufacturer = self.dut.getprop("ro.product.manufacturer")
+    self.record_data(
+        RecordData(
+            properties={
+                "suite_name": "NaviTest",
+                "run_identifier": f"[{manufacturer}-{self.dut.device.model}]",
+            }
         )
     )
 
@@ -760,6 +765,7 @@ class AndroidBumbleTestBase(BaseTestBase):
 
   @override
   async def async_teardown_class(self) -> None:
+    await super().async_teardown_class()
     for ref in self._refs:
       ref.adapter.stop()
     if self.results.failed or self.results.error:

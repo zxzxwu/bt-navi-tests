@@ -1541,8 +1541,8 @@ class PhoneCall:
       self.close()
 
 
-class MediaRecorder:
-  """Context managable MediaRecorder wrapper."""
+class AudioRecorder:
+  """Context managable AudioRecorder wrapper."""
 
   def __init__(
       self,
@@ -2592,13 +2592,13 @@ class SnippetWrapper:
         direction=direction,
     )
 
-  def start_media_recording(self, path: str) -> MediaRecorder:
-    """Starts media recording.
+  def start_audio_recording(self, path: str) -> AudioRecorder:
+    """Starts audio recording.
 
     Args:
       path: Path to the recording file.
 
     Returns:
-      The media recorder control block.
+      The audio recorder control block.
     """
-    return MediaRecorder(self.snippet, path)
+    return AudioRecorder(self.snippet, path)

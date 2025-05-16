@@ -154,7 +154,7 @@ class ClassicGapTest(navi_test_base.TwoDevicesTestBase):
         check_result=True,
     )
     dut_cb = self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER)
-    self.close_after_test.append(dut_cb)
+    self.test_case_context.push(dut_cb)
     ref_addr = str(self.ref.address)
     begin = datetime.datetime.now()
     auth_task: asyncio.tasks.Task | None = None

@@ -31,8 +31,16 @@ class build_py(_build_py):
             r"constants:?\s*\{\s*name:\s*\"(\w+)\"\s*string_value:\s*\"(\w+)\"\s*\}",
             src,
         )
+        # Generate Python binding
         with open(pathlib.Path("navi", "utils", "snippet_constants.py"), "w") as f:
             for key, value in matches:
                 f.write(f'{key} = "{value}"\n')
+        # Generate Kotlin binding
+        with open(pathlib.Path("snippet", "SnippetConstants.kt"), "w") as f:
+            f.write("package com.google.wireless.android.pixel.bluetooth.snippet\n\n")
+            f.write("object SnippetConstants {\n")
+            for key, value in matches:
+                f.write(f'  const val {key} = "{value}"\n')
+            f.write("}\n")
 
         return super().run()

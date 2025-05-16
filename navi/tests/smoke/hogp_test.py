@@ -290,7 +290,7 @@ class HogpTest(navi_test_base.TwoDevicesTestBase):
     report_characteristic = self.ref_keyboard_input_report_characteristic
 
     dut_input_cb = self.dut.bl4a.register_callback(bl4a_api.Module.INPUT)
-    self.close_after_test.append(dut_input_cb)
+    self.test_case_context.push(dut_input_cb)
 
     # Wait for the InputActivity to be ready.
     await asyncio.sleep(0.5)
@@ -306,18 +306,22 @@ class HogpTest(navi_test_base.TwoDevicesTestBase):
       )
       await self.ref.device.notify_subscribers(report_characteristic)
       self.logger.info("[DUT] Wait for key %s down", android_key_code.name)
-      event = await dut_input_cb.wait_for_event(bl4a_api.KeyEvent)
-      self.assertEqual(event.key_code, android_key_code)
-      self.assertEqual(event.action, android_constants.KeyAction.DOWN)
+      await dut_input_cb.wait_for_event(
+          bl4a_api.KeyEvent(
+              key_code=android_key_code, action=android_constants.KeyAction.DOWN
+          )
+      )
 
       self.logger.info("[REF] Release HID key %s", hid_key_code.name)
       report_characteristic.value = bytes(8)
 
       self.logger.info("[DUT] Wait for key %s up", android_key_code.name)
       await self.ref.device.notify_subscribers(report_characteristic)
-      event = await dut_input_cb.wait_for_event(bl4a_api.KeyEvent)
-      self.assertEqual(event.key_code, android_key_code)
-      self.assertEqual(event.action, android_constants.KeyAction.UP)
+      await dut_input_cb.wait_for_event(
+          bl4a_api.KeyEvent(
+              key_code=android_key_code, action=android_constants.KeyAction.UP
+          )
+      )
 
   async def test_mouse_click(self) -> None:
     """Tests the HID mouse click.
@@ -332,7 +336,7 @@ class HogpTest(navi_test_base.TwoDevicesTestBase):
     report_characteristic = self.ref_mouse_input_report_characteristic
 
     dut_input_cb = self.dut.bl4a.register_callback(bl4a_api.Module.INPUT)
-    self.close_after_test.append(dut_input_cb)
+    self.test_case_context.push(dut_input_cb)
 
     # Wait for the InputActivity to be ready.
     await asyncio.sleep(0.5)
@@ -368,7 +372,7 @@ class HogpTest(navi_test_base.TwoDevicesTestBase):
     report_characteristic = self.ref_mouse_input_report_characteristic
 
     dut_input_cb = self.dut.bl4a.register_callback(bl4a_api.Module.INPUT)
-    self.close_after_test.append(dut_input_cb)
+    self.test_case_context.push(dut_input_cb)
 
     # Wait for the InputActivity to be ready.
     await asyncio.sleep(0.5)

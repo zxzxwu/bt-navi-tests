@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import asyncio
-import enum
+from collections.abc import Callable
 import io
 import subprocess
 import sys
@@ -30,6 +30,9 @@ from bumble import hci
 from bumble import host
 from bumble import snoop
 from bumble import transport
+import bumble.transport.android_netsim
+import bumble.transport.common
+import grpc.aio
 from mobly.controllers import android_device
 from typing_extensions import override
 
@@ -41,11 +44,6 @@ from navi.utils import retry
 _HCI_PROXY_G3_PATH_PREFIX = 'navi/bumble_ext/android_hci_proxy_'
 _HCI_PROXY_DEVICE_PATH = '/data/local/tmp/hci_proxy'
 _DEVICE_ABSTRACT_SOCKET_PATH = 'hci_socket'
-
-
-class Driver(enum.StrEnum):
-  ANDROID = 'android'
-  PASSTHROUGH = 'passthrough'
 
 
 def _make_device(
@@ -98,7 +96,7 @@ class CrownDevice:
       return
 
     # open HCI transport & set device host.
-    self.hci = await transport.open_transport(self.adapter.hci_spec)
+    self.hci = await self.adapter.open_transport()
     self.device.host = host.Host(
         controller_source=self.hci.source, controller_sink=self.hci.sink
     )
@@ -196,9 +194,9 @@ class CrownAdapter:
   def __init__(self, spec: str) -> None:
     self._hci_spec = spec
 
-  @property
-  def hci_spec(self) -> str:
-    return self._hci_spec
+  async def open_transport(self) -> transport.Transport:
+    """Opens a HCI transport."""
+    return await transport.open_transport(self._hci_spec)
 
   def stop(self) -> None:
     """Stops the adapter."""
@@ -294,4 +292,22 @@ class AndroidCrownAdapter(CrownAdapter):
     # Disable Satellite Mode.
     self.ad.adb.shell(
         ['settings', 'put', 'global', 'satellite_mode_enabled', '0']
+    )
+
+
+class NetsimCrownAdapter(CrownAdapter):
+  """Adapter for Netsim."""
+
+  def __init__(self, channel_factory: Callable[[], grpc.aio.Channel]) -> None:
+    self._channel_factory = channel_factory
+    super().__init__('')
+
+  @override
+  async def open_transport(self) -> transport.Transport:
+    """Opens a HCI transport."""
+    channel = self._channel_factory()
+    await channel.channel_ready()
+
+    return await bumble.transport.android_netsim.open_android_netsim_host_transport_with_channel(
+        channel
     )

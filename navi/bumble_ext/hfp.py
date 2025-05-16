@@ -14,11 +14,16 @@
 
 """Extended Bumble implementation of HFP protocol."""
 
+import asyncio
 import logging
 
 from bumble import hci
 from bumble import hfp
+from bumble import rfcomm
+import bumble.device
 from typing_extensions import override
+
+from navi.bumble_ext import rfcomm as rfcomm_ext
 
 _logger = logging.getLogger(__name__)
 
@@ -55,7 +60,67 @@ ESCO_PARAMETERS_T2_TRANSPARENT = hfp.EscoParameters(
 
 class HfProtocol(hfp.HfProtocol):
   """Customized HF Protocol."""
+
   controller_supported_codecs: list[hci.CodecID] | None = None
+
+  @classmethod
+  def setup_server(
+      cls,
+      device: bumble.device.Device,
+      sdp_handle: int,
+      configuration: hfp.HfConfiguration,
+      auto_accept_sco_request: bool = True,
+  ) -> asyncio.Queue["HfProtocol"]:
+    """Creates a HFP server on the given device.
+
+    Args:
+      device: The device to create the HFP server on.
+      sdp_handle: The SDP handle to use for the HFP server.
+      configuration: The configuration to use for the HFP server.
+      auto_accept_sco_request: Whether to automatically accept SCO requests.
+
+    Returns:
+      A queue of HFP protocols.
+    """
+    protocol_queue = asyncio.Queue[HfProtocol]()
+
+    def on_dlc(dlc: rfcomm.DLC) -> None:
+      _logger.info("[REF] HFP DLC connected %s.", dlc)
+      hfp_protocol = HfProtocol(dlc, configuration, auto_accept_sco_request)
+      protocol_queue.put_nowait(hfp_protocol)
+      dlc.multiplexer.l2cap_channel.connection.abort_on(
+          "disconnection", hfp_protocol.run()
+      )
+
+    # Create and register a server.
+    rfcomm_server = rfcomm_ext.get_rfcomm_server(device) or rfcomm.Server(
+        device
+    )
+
+    # Listen for incoming DLC connections.
+    channel_number = rfcomm_server.listen(on_dlc)
+    _logger.info(
+        "[REF] Listening for RFCOMM connection on channel %s.", channel_number
+    )
+    device.sdp_service_records[sdp_handle] = hfp.make_hf_sdp_records(
+        service_record_handle=sdp_handle,
+        rfcomm_channel=channel_number,
+        configuration=configuration,
+    )
+    return protocol_queue
+
+  def __init__(
+      self,
+      dlc: rfcomm.DLC,
+      configuration: hfp.HfConfiguration,
+      auto_accept_sco_request: bool = True,
+  ) -> None:
+    self.auto_accept_sco_request = auto_accept_sco_request
+    if auto_accept_sco_request:
+      dlc.multiplexer.l2cap_channel.connection.device.on(
+          "sco_request", self._on_sco_request
+      )
+    super().__init__(dlc=dlc, configuration=configuration)
 
   @override
   async def setup_codec_connection(self, codec_id: int) -> None:
@@ -67,6 +132,25 @@ class HfProtocol(hfp.HfProtocol):
     connection = self.dlc.multiplexer.l2cap_channel.connection
     connection.abort_on(
         "disconnection", self.execute_command(f"AT+BCS={codec_id}")
+    )
+
+  async def _on_sco_request(
+      self, connection: bumble.device.Connection, link_type: int
+  ) -> None:
+    """Called when a SCO request is received."""
+    del link_type
+    await self.accept_sco_request(connection)
+
+  async def accept_sco_request(
+      self, connection: bumble.device.Connection | None = None
+  ) -> None:
+    """Accepts Bumble SCO request."""
+    connection = connection or self.dlc.multiplexer.l2cap_channel.connection
+    await connection.device.send_command(
+        hci.HCI_Enhanced_Accept_Synchronous_Connection_Request_Command(
+            bd_addr=connection.peer_address,
+            **(await self.get_esco_parameters()).asdict(),
+        )
     )
 
   async def _get_controller_supported_codecs(self) -> list[hci.CodecID]:

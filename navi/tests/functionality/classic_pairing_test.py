@@ -66,7 +66,7 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
     self.ref.device.pairing_config_factory = pairing_config_factory
 
     dut_cb = self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER)
-    self.close_after_test.append(dut_cb)
+    self.test_case_context.push(dut_cb)
     self.logger.info('[REF] Disable SSP on REF.')
     await self.ref.device.send_command(
         hci.HCI_Write_Simple_Pairing_Mode_Command(simple_pairing_mode=0),
