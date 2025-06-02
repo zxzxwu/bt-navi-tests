@@ -17,7 +17,6 @@ import statistics
 from bumble import a2dp
 from bumble import avdtp
 from bumble import core
-from bumble import hci
 from mobly import test_runner
 from typing_extensions import override
 
@@ -75,7 +74,7 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
         )
 
     avdtp_listener = avdtp.Listener.for_device(self.ref.device)
-    avdtp_listener.on("connection", on_avdtp_connection)
+    avdtp_listener.on(avdtp_listener.EVENT_CONNECTION, on_avdtp_connection)
 
   async def pair_and_connect(self) -> None:
     """Tests A2DP connection establishment right after a pairing session."""
@@ -89,28 +88,12 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
           )
       )
 
-  async def _terminate_connection_from_ref(self) -> None:
-    self.logger.info("[DUT] Terminate connection.")
-    with self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER) as dut_cb:
-      ref_acl = self.ref.device.find_connection_by_bd_addr(
-          hci.Address(self.dut.address), transport=core.PhysicalTransport.BR_EDR
-      )
-      if ref_acl is None:
-        self.logger.info("[REF] No ACL connection found.")
-        return
-      await ref_acl.disconnect()
-      await dut_cb.wait_for_event(
-          bl4a_api.AclDisconnected(
-              self.ref.address, transport=android_constants.Transport.CLASSIC
-          ),
-      )
-
   async def test_a2dp_connection_outgoing(self) -> None:
     """Test make outgoing A2DP connections."""
     success_count = 0
     latency_list = list[float]()
     await self.pair_and_connect()
-    await self._terminate_connection_from_ref()
+    await performance_tool.terminate_connection_from_ref(self.dut, self.ref)
     for i in range(_DEFAULT_REPEAT_TIMES):
       try:
         with self.dut.bl4a.register_callback(bl4a_api.Module.A2DP) as dut_cb:
@@ -132,7 +115,7 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
       except (core.BaseBumbleError, AssertionError):
         self.logger.exception("Failed to make A2DP connection")
       finally:
-        await self._terminate_connection_from_ref()
+        await performance_tool.terminate_connection_from_ref(self.dut, self.ref)
     self.logger.info(
         "[success rate] Passes: %d / Attempts: %d",
         success_count,

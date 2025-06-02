@@ -36,12 +36,12 @@ from navi.utils import android_constants
 from navi.utils import bl4a_api
 
 _PROPERTY_BROADCAST_SOURCE_ENABLED = (
-    'bluetooth.profile.bap.broadcast.source.enabled'
+    "bluetooth.profile.bap.broadcast.source.enabled"
 )
 _PROPERTY_BROADCAST_ASSIST_ENABLED = (
-    'bluetooth.profile.bap.broadcast.assist.enabled'
+    "bluetooth.profile.bap.broadcast.assist.enabled"
 )
-_PROPERTY_BYPASS_ALLOW_LIST = 'persist.bluetooth.leaudio.bypass_allow_list'
+_PROPERTY_BYPASS_ALLOW_LIST = "persist.bluetooth.leaudio.bypass_allow_list"
 _DEFAULT_TIMEOUT_SECEONDS = 10.0
 _SUBGROUP_INDEX = 0
 
@@ -75,10 +75,10 @@ def _make_basic_audio_announcement(
               ),
               metadata=le_audio.Metadata([
                   le_audio.Metadata.Entry(
-                      tag=le_audio.Metadata.Tag.LANGUAGE, data=b'eng'
+                      tag=le_audio.Metadata.Tag.LANGUAGE, data=b"eng"
                   ),
                   le_audio.Metadata.Entry(
-                      tag=le_audio.Metadata.Tag.PROGRAM_INFO, data=b'Disco'
+                      tag=le_audio.Metadata.Tag.PROGRAM_INFO, data=b"Disco"
                   ),
               ]),
               bis=[
@@ -140,13 +140,13 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
   async def async_setup_class(self) -> None:
     await super().async_setup_class()
 
-    if self.dut.getprop(_PROPERTY_BROADCAST_SOURCE_ENABLED) == 'true':
+    if self.dut.getprop(_PROPERTY_BROADCAST_SOURCE_ENABLED) == "true":
       self._broadcast_enabled = True
-    if self.dut.getprop(_PROPERTY_BROADCAST_ASSIST_ENABLED) == 'true':
+    if self.dut.getprop(_PROPERTY_BROADCAST_ASSIST_ENABLED) == "true":
       self._bass_enabled = True
 
     if not self._broadcast_enabled and not self._bass_enabled:
-      raise signals.TestAbortClass('Broadcast source and BASS are not enabled.')
+      raise signals.TestAbortClass("Broadcast source and BASS are not enabled.")
 
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECEONDS):
       await self.ref.open()
@@ -157,11 +157,11 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
         | hci.LeFeatureMask.LE_PERIODIC_ADVERTISING
         | hci.LeFeatureMask.ISOCHRONOUS_BROADCASTER
     ):
-      raise signals.TestAbortClass('REF does not support LE features.')
+      raise signals.TestAbortClass("REF does not support LE features.")
 
     self.ref.config.cis_enabled = True
     # Disable the allow list to allow the connect LE Audio to Bumble.
-    self.dut.setprop(_PROPERTY_BYPASS_ALLOW_LIST, 'true')
+    self.dut.setprop(_PROPERTY_BYPASS_ALLOW_LIST, "true")
 
   @override
   async def async_setup_test(self) -> None:
@@ -209,15 +209,15 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
       ):
         broadcast_advertisements.put_nowait(advertisement)
 
-    self.ref.device.on('advertisement', on_advertisement)
+    self.ref.device.on(self.ref.device.EVENT_ADVERTISEMENT, on_advertisement)
 
-    self.logger.info('[REF] Start scanning')
+    self.logger.info("[REF] Start scanning")
     await self.ref.device.start_scanning()
 
-    self.logger.info('[REF] Wait for broadcast advertisement')
+    self.logger.info("[REF] Wait for broadcast advertisement")
     broadcast_advertisement = await broadcast_advertisements.get()
 
-    self.logger.info('[REF] Create periodic advertising sync')
+    self.logger.info("[REF] Create periodic advertising sync")
     pa_sync = await self.ref.device.create_periodic_advertising_sync(
         advertiser_address=broadcast_advertisement.address,
         sid=broadcast_advertisement.sid,
@@ -248,20 +248,20 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
     ) -> None:
       big_info_advertisements.put_nowait(advertisement)
 
-    pa_sync.on('periodic_advertisement', on_periodic_advertisement)
-    pa_sync.on('biginfo_advertisement', on_biginfo_advertisement)
+    pa_sync.on(pa_sync.EVENT_PERIODIC_ADVERTISEMENT, on_periodic_advertisement)
+    pa_sync.on(pa_sync.EVENT_BIGINFO_ADVERTISEMENT, on_biginfo_advertisement)
 
-    self.logger.info('[REF] Wait for basic audio announcement')
+    self.logger.info("[REF] Wait for basic audio announcement")
     basic_audio_announcement = await basic_audio_announcements.get()
     subgroup = basic_audio_announcement.subgroups[subgroup_index]
 
-    self.logger.info('[REF] Wait for BIG info advertisement')
+    self.logger.info("[REF] Wait for BIG info advertisement")
     await big_info_advertisements.get()
 
-    self.logger.info('[REF] Stop scanning')
+    self.logger.info("[REF] Stop scanning")
     await self.ref.device.stop_scanning()
 
-    self.logger.info('[REF] Sync with BIG')
+    self.logger.info("[REF] Sync with BIG")
     big_sync = await self.ref.device.create_big_sync(
         pa_sync,
         device.BigSyncParameters(
@@ -283,7 +283,7 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
   ) -> tuple[device.AdvertisingSet, device.Big]:
     broadcast_audio_announcement = bap.BroadcastAudioAnnouncement(broadcast_id)
 
-    self.logger.info('[REF] Start Advertising')
+    self.logger.info("[REF] Start Advertising")
     advertising_set = await self.ref.device.create_advertising_set(
         advertising_parameters=device.AdvertisingParameters(
             advertising_event_properties=device.AdvertisingEventProperties(
@@ -297,7 +297,7 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
             + bytes(
                 core.AdvertisingData([(
                     core.AdvertisingData.BROADCAST_NAME,
-                    broadcast_name.encode('utf-8'),
+                    broadcast_name.encode("utf-8"),
                 )])
             )
         ),
@@ -314,10 +314,10 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
         auto_start=True,
     )
 
-    self.logger.info('[REF] Start Periodic Advertising')
+    self.logger.info("[REF] Start Periodic Advertising")
     await advertising_set.start_periodic()
 
-    self.logger.info('[REF] Create BIG')
+    self.logger.info("[REF] Create BIG")
     big = await self.ref.device.create_big(
         advertising_set,
         parameters=device.BigParameters(
@@ -375,14 +375,14 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
       )
       self.ref.device.add_service(self._ref_bass_service)
       await self.le_connect_and_pair(hci.OwnAddressType.RANDOM)
-      self.logger.info('[DUT] Wait for LE Audio connected')
+      self.logger.info("[DUT] Wait for LE Audio connected")
       await dut_lea_cb.wait_for_event(
           bl4a_api.ProfileConnectionStateChanged(
               address=self.ref.random_address,
               state=android_constants.ConnectionState.CONNECTED,
           ),
       )
-      self.logger.info('[DUT] Wait for BASS connected')
+      self.logger.info("[DUT] Wait for BASS connected")
       await dut_bass_cb.wait_for_event(
           bl4a_api.ProfileConnectionStateChanged(
               address=self.ref.random_address,
@@ -403,7 +403,7 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
       ),
       high_quality_encrypted=dict(
           quality=android_constants.LeAudioBroadcastQuality.HIGH,
-          broadcast_code=b'1234567890abcdef',
+          broadcast_code=b"1234567890abcdef",
           expected_sampling_frequency=bap.SamplingFrequency.FREQ_48000,
       ),
   )
@@ -432,12 +432,12 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
         broadcast.
     """
     if not self._broadcast_enabled:
-      self.skipTest('Broadcast source is not enabled.')
+      self.skipTest("Broadcast source is not enabled.")
 
     # TODO: LEHS must be connected before starting broadcast.
     await self._prepare_paired_devices()
 
-    self.logger.info('[DUT] Start broadcasting')
+    self.logger.info("[DUT] Start broadcasting")
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECEONDS):
       broadcast = await self.dut.bl4a.start_le_audio_broadcast(
           broadcast_code=broadcast_code,
@@ -446,10 +446,10 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
           ],
       )
 
-    self.logger.info('[DUT] Broadcast created, ID: %d', broadcast.broadcast_id)
+    self.logger.info("[DUT] Broadcast created, ID: %d", broadcast.broadcast_id)
 
     # Since 25Q1, broadcast will be started only during audio playback.
-    self.logger.info('[DUT] Start audio playback')
+    self.logger.info("[DUT] Start audio playback")
     self.dut.bt.audioSetRepeat(android_constants.RepeatMode.ALL)
     self.dut.bt.audioPlaySine()
 
@@ -470,22 +470,22 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
     sync_lost = asyncio.Event()
     big_sync.once(big_sync.Event.TERMINATION, lambda _: sync_lost.set())
 
-    self.logger.info('[DUT] Stop broadcasting')
+    self.logger.info("[DUT] Stop broadcasting")
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECEONDS):
       await broadcast.stop()
 
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECEONDS):
-      self.logger.info('[REF] Wait for sync lost')
+      self.logger.info("[REF] Wait for sync lost")
       await sync_lost.wait()
 
   @navi_test_base.named_parameterized(
       dict(
-          testcase_name='unencrypted',
+          testcase_name="unencrypted",
           broadcast_code=None,
       ),
       dict(
-          testcase_name='encrypted',
-          broadcast_code=b'1234567890abcdef',
+          testcase_name="encrypted",
+          broadcast_code=b"1234567890abcdef",
       ),
   )
   async def test_broadcast_assist_search(
@@ -502,11 +502,11 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
       broadcast_code: The broadcast code of the broadcast.
     """
     if not self._bass_enabled:
-      self.skipTest('BASS is not enabled.')
+      self.skipTest("BASS is not enabled.")
 
     broadcast_id = random.randint(0, 0xFFFFFF)
-    broadcast_name = 'Bumble Auracast'
-    self.logger.info('[REF] Broadcast ID: %d', broadcast_id)
+    broadcast_name = "Bumble Auracast"
+    self.logger.info("[REF] Broadcast ID: %d", broadcast_id)
 
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECEONDS):
       await self._start_broadcast_on_ref(
@@ -520,7 +520,7 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
 
     with self.dut.bl4a.register_callback(bl4a_api.Module.BASS) as bass_callback:
       self.dut.bt.bassStartSearching()
-      self.logger.info('[DUT] Wait for broadcast source found')
+      self.logger.info("[DUT] Wait for broadcast source found")
       source_found_event = await bass_callback.wait_for_event(
           bl4a_api.BroadcastSourceFound,
           lambda e: (
@@ -535,12 +535,12 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
 
   @navi_test_base.named_parameterized(
       dict(
-          testcase_name='unencrypted',
+          testcase_name="unencrypted",
           broadcast_code=None,
       ),
       dict(
-          testcase_name='encrypted',
-          broadcast_code=b'1234567890abcdef',
+          testcase_name="encrypted",
+          broadcast_code=b"1234567890abcdef",
       ),
   )
   async def test_assistant_add_local_source(
@@ -562,13 +562,13 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
       broadcast_code: The broadcast code of the broadcast.
     """
     if not self._bass_enabled:
-      self.skipTest('BASS is not enabled.')
+      self.skipTest("BASS is not enabled.")
     if not self._broadcast_enabled:
-      self.skipTest('Broadcast source is not enabled.')
+      self.skipTest("Broadcast source is not enabled.")
 
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECEONDS):
       self.logger.info(
-          '[REF] Set default periodic advertising sync transfer parameters'
+          "[REF] Set default periodic advertising sync transfer parameters"
       )
       await self.ref.device.send_command(
           hci.HCI_LE_Set_Default_Periodic_Advertising_Sync_Transfer_Parameters_Command(
@@ -579,7 +579,7 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
 
     await self._prepare_paired_devices()
 
-    self.logger.info('[DUT] Start broadcasting')
+    self.logger.info("[DUT] Start broadcasting")
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECEONDS):
       broadcast = await self.dut.bl4a.start_le_audio_broadcast(
           broadcast_code=broadcast_code,
@@ -590,14 +590,14 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
           ],
       )
 
-    self.logger.info('[DUT] Broadcast created, ID: %d', broadcast.broadcast_id)
+    self.logger.info("[DUT] Broadcast created, ID: %d", broadcast.broadcast_id)
 
     # Since 25Q1, broadcast will be started only during audio playback.
-    self.logger.info('[DUT] Start audio playback')
+    self.logger.info("[DUT] Start audio playback")
     self.dut.bt.audioSetRepeat(android_constants.RepeatMode.ALL)
     self.dut.bt.audioPlaySine()
 
-    self.logger.info('[DUT] Add broadcast source')
+    self.logger.info("[DUT] Add broadcast source")
     broadcast_metadata = self.dut.bt.getAllBroadcastMetadata()[0]
     add_source_task = asyncio.create_task(
         asyncio.to_thread(
@@ -608,11 +608,11 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
     )
 
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECEONDS):
-      self.logger.info('[REF] Wait for add source operation')
+      self.logger.info("[REF] Wait for add source operation")
       operation = await self._ref_bass_service.operations.get()
 
     if not isinstance(operation, bass.AddSourceOperation):
-      self.fail(f'Expected AddSourceOperation, got {operation}')
+      self.fail(f"Expected AddSourceOperation, got {operation}")
     self.assertEqual(operation.broadcast_id, broadcast.broadcast_id)
     self.assertEqual(
         operation.pa_sync,
@@ -646,7 +646,7 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
 
     setattr(
         self.ref.device.host,
-        'on_hci_le_periodic_advertising_sync_transfer_received_event',
+        "on_hci_le_periodic_advertising_sync_transfer_received_event",
         on_past_event,
     )
 
@@ -657,32 +657,34 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
         broadcast_id=operation.broadcast_id,
         pa_sync_state=bass.BroadcastReceiveState.PeriodicAdvertisingSyncState.SYNCINFO_REQUEST,
         big_encryption=bass.BroadcastReceiveState.BigEncryption.NOT_ENCRYPTED,
-        bad_code=b'',
+        bad_code=b"",
         subgroups=operation.subgroups,
     )
     self._ref_bass_service.broadcast_receive_state_characteristic.value = bytes(
         receiver_state
     )
-    self.logger.info('[REF] Update broadcast receive state')
+    self.logger.info("[REF] Update broadcast receive state")
     await self.ref.device.notify_subscribers(
         self._ref_bass_service.broadcast_receive_state_characteristic
     )
-    self.logger.info('[REF] Wait for sync info')
+    self.logger.info("[REF] Wait for sync info")
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECEONDS):
       while past_event := await past_events.get():
         if (
             past_event.advertising_sid == operation.advertising_sid
             and past_event.advertiser_address == operation.advertiser_address
         ):
-          self.logger.info('[REF] Sync info received')
+          self.logger.info("[REF] Sync info received")
           break
 
     pa_sync = self.ref.device.periodic_advertising_syncs[0]
     biginfo_advertisements = asyncio.Queue[device.BIGInfoAdvertisement]()
-    pa_sync.on('biginfo_advertisement', biginfo_advertisements.put_nowait)
+    pa_sync.on(
+        pa_sync.EVENT_BIGINFO_ADVERTISEMENT, biginfo_advertisements.put_nowait
+    )
 
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECEONDS):
-      self.logger.info('[REF] Wait for BIG info advertisement')
+      self.logger.info("[REF] Wait for BIG info advertisement")
       biginfo_advertisement = await biginfo_advertisements.get()
 
     encryped = bool(broadcast_code)
@@ -701,22 +703,22 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
     )
 
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECEONDS):
-      self.logger.info('[REF] Update broadcast receive state')
+      self.logger.info("[REF] Update broadcast receive state")
       await self.ref.device.notify_subscribers(
           self._ref_bass_service.broadcast_receive_state_characteristic
       )
 
     if encryped:
       async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECEONDS):
-        self.logger.info('[REF] Wait for set broadcast code operation')
+        self.logger.info("[REF] Wait for set broadcast code operation")
         operation = await self._ref_bass_service.operations.get()
 
       if not isinstance(operation, bass.SetBroadcastCodeOperation):
-        self.fail(f'Expected SetBroadcastCodeOperation, got {operation}')
+        self.fail(f"Expected SetBroadcastCodeOperation, got {operation}")
       self.assertEqual(operation.broadcast_code, broadcast_code)
 
       async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECEONDS):
-        self.logger.info('[REF] Update broadcast receive state')
+        self.logger.info("[REF] Update broadcast receive state")
         receiver_state.big_encryption = (
             bass.BroadcastReceiveState.BigEncryption.DECRYPTING
         )
@@ -728,16 +730,16 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
         )
 
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECEONDS):
-      self.logger.info('[DUT] Wait for add source operation complete')
+      self.logger.info("[DUT] Wait for add source operation complete")
       await add_source_task
 
   @navi_test_base.named_parameterized(
       dict(
-          testcase_name='synced',
+          testcase_name="synced",
           pa_sync_state=bass.BroadcastReceiveState.PeriodicAdvertisingSyncState.SYNCHRONIZED_TO_PA,
       ),
       dict(
-          testcase_name='unsynced',
+          testcase_name="unsynced",
           pa_sync_state=bass.BroadcastReceiveState.PeriodicAdvertisingSyncState.NOT_SYNCHRONIZED_TO_PA,
       ),
   )
@@ -746,17 +748,17 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
       pa_sync_state: bass.BroadcastReceiveState.PeriodicAdvertisingSyncState,
   ) -> None:
     if not self._bass_enabled:
-      self.skipTest('BASS is not enabled.')
+      self.skipTest("BASS is not enabled.")
 
     # Pretend the broadcast source is already added.
     receiver_state = bass.BroadcastReceiveState(
         source_id=0,
-        source_address=hci.Address('00:11:22:33:44:55'),
+        source_address=hci.Address("00:11:22:33:44:55"),
         source_adv_sid=0,
         broadcast_id=0x123456,
         pa_sync_state=pa_sync_state,
         big_encryption=bass.BroadcastReceiveState.BigEncryption.NOT_ENCRYPTED,
-        bad_code=b'',
+        bad_code=b"",
         subgroups=[],
     )
     broadcast_receive_state_characteristic = (
@@ -765,7 +767,7 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
     broadcast_receive_state_characteristic.value = bytes(receiver_state)
     await self._prepare_paired_devices()
 
-    self.logger.info('[DUT] Remove broadcast source')
+    self.logger.info("[DUT] Remove broadcast source")
     remove_source_task = asyncio.create_task(
         asyncio.to_thread(
             lambda: self.dut.bt.bassRemoveSource(self.ref.random_address, 0)
@@ -777,10 +779,10 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
         == bass.BroadcastReceiveState.PeriodicAdvertisingSyncState.SYNCHRONIZED_TO_PA
     ):
       async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECEONDS):
-        self.logger.info('[REF] Wait for modify source operation')
+        self.logger.info("[REF] Wait for modify source operation")
         operation = await self._ref_bass_service.operations.get()
       if not isinstance(operation, bass.ModifySourceOperation):
-        self.fail(f'Expected ModifySourceOperation, got {operation}')
+        self.fail(f"Expected ModifySourceOperation, got {operation}")
       self.assertEqual(operation.source_id, 0)
       self.assertEqual(
           operation.pa_sync,
@@ -788,7 +790,7 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
       )
 
       async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECEONDS):
-        self.logger.info('[REF] Update broadcast receive state')
+        self.logger.info("[REF] Update broadcast receive state")
         receiver_state.pa_sync_state = (
             bass.BroadcastReceiveState.PeriodicAdvertisingSyncState.NOT_SYNCHRONIZED_TO_PA
         )
@@ -798,23 +800,23 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
         )
 
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECEONDS):
-      self.logger.info('[REF] Wait for remove source operation')
+      self.logger.info("[REF] Wait for remove source operation")
       operation = await self._ref_bass_service.operations.get()
     if not isinstance(operation, bass.RemoveSourceOperation):
-      self.fail(f'Expected RemoveSourceOperation, got {operation}')
+      self.fail(f"Expected RemoveSourceOperation, got {operation}")
     self.assertEqual(operation.source_id, 0)
 
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECEONDS):
-      self.logger.info('[REF] Update broadcast receive state')
-      broadcast_receive_state_characteristic.value = b''
+      self.logger.info("[REF] Update broadcast receive state")
+      broadcast_receive_state_characteristic.value = b""
       await self.ref.device.notify_subscribers(
           broadcast_receive_state_characteristic
       )
 
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECEONDS):
-      self.logger.info('[DUT] Wait for remove source operation complete')
+      self.logger.info("[DUT] Wait for remove source operation complete")
       await remove_source_task
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
   test_runner.main()

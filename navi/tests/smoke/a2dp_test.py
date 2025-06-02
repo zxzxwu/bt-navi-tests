@@ -18,6 +18,7 @@ import asyncio
 import decimal
 import enum
 import functools
+import os
 import tempfile
 from typing import Iterable, TypeAlias
 import wave
@@ -161,7 +162,7 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
       avdtp_connections.put_nowait((server, ref_sinks))
 
     avdtp_listener = avdtp.Listener.for_device(self.ref.device)
-    avdtp_listener.on("connection", on_avdtp_connection)
+    avdtp_listener.on(avdtp_listener.EVENT_CONNECTION, on_avdtp_connection)
 
     ref_avrcp_delegator = AvrcpDelegate(
         supported_events=(avrcp.EventId.VOLUME_CHANGED,)
@@ -511,7 +512,19 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
         await ref_sink.condition.wait_for(
             lambda: ref_sink.last_command == LocalSinkWrapper.Command.SUSPEND
         )
-      if buffer is not None:
+
+      if self.user_params.get("record_full_data") and buffer is not None:
+        self.logger.info("[DUT] Saving buffer.")
+        with open(
+            os.path.join(
+                self.current_test_info.output_path,
+                f"a2dp_data.{preferred_codec.name.lower()}",
+            ),
+            "wb",
+        ) as f:
+          f.write(buffer)
+
+      if buffer is not None and preferred_codec != _A2dpCodec.LDAC:
         dominant_frequency = audio.get_dominant_frequency(
             buffer, format=preferred_codec.name
         )

@@ -25,14 +25,13 @@ import logging
 import pathlib
 import re
 import secrets
-from typing import Any, ClassVar, Never, TypeAlias, cast, final
+from typing import Any, cast, ClassVar, final, Never, TypeAlias
 
 from absl.testing import absltest
 from bumble import pairing
 import bumble.core
 import bumble.device
 import bumble.hci
-import grpc.aio
 from mobly import base_test
 from mobly import records
 from mobly import runtime_test_info
@@ -62,6 +61,7 @@ _DEFAULT_ADVERTISING_INTERVAL = 100
 class CrownDriver(enum.StrEnum):
   ANDROID = "android"
   PASSTHROUGH = "passthrough"
+  CF_ROOTCANAL = "cf_rootcanal"
 
 
 @dataclasses.dataclass
@@ -684,6 +684,20 @@ class AndroidBumbleTestBase(BaseTestBase):
             )
             for hci_spec in self._get_passthrough_hci_specs()
         ]
+      case CrownDriver.CF_ROOTCANAL:
+        controllers = self._get_android_controllers(1)
+        self.dut = self.dut_wrapper_factory(controllers[0])
+        netsim_port = int(self.dut.adb.forward(["tcp:0", "vsock:2:7300"]))
+        self.test_class_context.callback(
+            lambda: self.dut.adb.forward(["--remove", f"tcp:{netsim_port}"])
+        )
+        self._refs = [
+            await crown.CrownDevice.create(
+                crown.CrownAdapter(f"tcp-client:localhost:{netsim_port}"),
+                make_config(),
+            )
+            for _ in range(self.NUM_REF_DEVICES)
+        ]
       case _:
         raise ValueError("Unsupported Crown driver")
 
@@ -716,8 +730,7 @@ class AndroidBumbleTestBase(BaseTestBase):
         )
     )
 
-  @override
-  def on_fail(self, record: records.TestResultRecord) -> None:
+  def _get_btsnoop_and_dumpsys(self) -> None:
     adb_snippets.download_btsnoop(
         device=self.dut.device,
         destination_base_path=self.current_test_info.output_path,
@@ -743,7 +756,7 @@ class AndroidBumbleTestBase(BaseTestBase):
             filename_prefix="bumble",
         )
 
-  @retry_lib.retry_on_exception(initial_delay_sec=1, num_retries=3)
+  @retry_lib.retry_on_exception()
   @override
   async def async_setup_test(self) -> None:
     # Make sure Bluetooth is enabled before factory reset.
@@ -764,12 +777,25 @@ class AndroidBumbleTestBase(BaseTestBase):
     self.assertTrue(self.dut.bt.enable())
 
   @override
+  def on_fail(self, record: records.TestResultRecord) -> None:
+    self._get_btsnoop_and_dumpsys()
+
+  @override
+  def on_pass(self, record: records.TestResultRecord) -> None:
+    if self.user_params.get("record_full_data"):
+      self._get_btsnoop_and_dumpsys()
+
+  @override
   async def async_teardown_class(self) -> None:
+    if (
+        self.results.failed
+        or self.results.error
+        or self.user_params.get("record_full_data")
+    ):
+      self.dut.device.take_bug_report()
     await super().async_teardown_class()
     for ref in self._refs:
       ref.adapter.stop()
-    if self.results.failed or self.results.error:
-      self.dut.device.take_bug_report()
 
   @retry_lib.retry_on_exception(initial_delay_sec=1, num_retries=3)
   async def classic_connect_and_pair(

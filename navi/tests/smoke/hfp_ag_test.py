@@ -340,7 +340,9 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       ref_hfp_protocol = await ref_hfp_protocol_queue.get()
 
     sco_links = asyncio.Queue[device.ScoLink]()
-    self.ref.device.on("sco_connection", sco_links.put_nowait)
+    self.ref.device.on(
+        self.ref.device.EVENT_SCO_CONNECTION, sco_links.put_nowait
+    )
 
     self.logger.info("[DUT] Add call.")
     with self.dut.bl4a.make_phone_call(
@@ -398,7 +400,7 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
           ref_sink_buffer.extend(packet.data)
 
         sco_link.sink = on_sco_packet
-        sco_link.abort_on("disconnection", source_streamer())
+        sco_link.abort_on(sco_link.EVENT_DISCONNECTION, source_streamer())
 
       # Streaming for 5 seconds.
       await asyncio.sleep(5.0)
@@ -563,7 +565,7 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
           ag_indicator.current_status
       )
 
-    ref_hfp_protocol.on("ag_indicator", on_ag_indicator)
+    ref_hfp_protocol.on(ref_hfp_protocol.EVENT_AG_INDICATOR, on_ag_indicator)
 
     self.logger.info("[DUT] Make phone call.")
     with self.dut.bl4a.make_phone_call(
@@ -764,7 +766,9 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
 
         if issuer == constants.TestRole.DUT:
           volumes = asyncio.Queue[int]()
-          ref_hfp_protocol.on("speaker_volume", volumes.put_nowait)
+          ref_hfp_protocol.on(
+              ref_hfp_protocol.EVENT_SPEAKER_VOLUME, volumes.put_nowait
+          )
 
           self.logger.info("[DUT] Set volume to %d.", expected_volume)
           self.dut.bt.setVolume(_STREAM_TYPE_CALL, expected_volume)
@@ -830,7 +834,7 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
           ag_indicator.current_status
       )
 
-    ref_hfp_protocol.on("ag_indicator", on_ag_indicator)
+    ref_hfp_protocol.on(ref_hfp_protocol.EVENT_AG_INDICATOR, on_ag_indicator)
 
     self.logger.info("[DUT] Make incoming call.")
     with self.dut.bl4a.make_phone_call(
@@ -905,7 +909,7 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
           ag_indicator.current_status
       )
 
-    ref_hfp_protocol.on("ag_indicator", on_ag_indicator)
+    ref_hfp_protocol.on(ref_hfp_protocol.EVENT_AG_INDICATOR, on_ag_indicator)
 
     self.logger.info("[DUT] Make incoming call.")
     with (

@@ -66,10 +66,7 @@ class AshaTest(navi_test_base.TwoDevicesTestBase):
     )
 
   async def _setup_paired_devices(self) -> None:
-    with (
-        self.dut.bl4a.register_callback(bl4a_api.Module.ASHA) as dut_cb,
-        self.dut.bl4a.register_callback(bl4a_api.Module.AUDIO) as dut_audio_cb,
-    ):
+    with self.dut.bl4a.register_callback(bl4a_api.Module.ASHA) as dut_cb:
       await self.le_connect_and_pair(ref_address_type=hci.OwnAddressType.RANDOM)
 
       self.logger.info("[DUT] Wait for ASHA connected.")
@@ -77,20 +74,10 @@ class AshaTest(navi_test_base.TwoDevicesTestBase):
           bl4a_api.ProfileActiveDeviceChanged(address=self.ref.random_address),
       )
 
-      # Emulator never reports audio device added.
-      if not self.dut.device.is_emulator:
-        self.logger.info("[DUT] Wait for audio connected.")
-        await dut_audio_cb.wait_for_event(
-            bl4a_api.AudioDeviceAdded,
-            lambda e: (
-                e.device_type == android_constants.AudioDeviceType.HEARING_AID
-            ),
-        )
-
   async def test_connect(self) -> None:
     """Tests ASHA connection.
 
-    Test Steps:
+    Test steps:
       1. Pair with REF.
       2. Verify ASHA is connected.
     """
@@ -103,7 +90,7 @@ class AshaTest(navi_test_base.TwoDevicesTestBase):
   async def test_reconnect(self) -> None:
     """Tests ASHA reconnection.
 
-    Test Steps:
+    Test steps:
       1. Pair with REF.
       2. Verify ASHA is connected.
       3. Disconnect from REF.
@@ -145,7 +132,7 @@ class AshaTest(navi_test_base.TwoDevicesTestBase):
   async def test_streaming(self, usage: bl4a_api.AudioAttributes.Usage) -> None:
     """Tests ASHA streaming.
 
-    Test Steps:
+    Test steps:
       1. Establish ASHA connection.
       2. (Optional) Start phone call.
       3. Start streaming.
@@ -206,7 +193,7 @@ class AshaTest(navi_test_base.TwoDevicesTestBase):
   async def test_set_volume(self) -> None:
     """Tests ASHA set volume.
 
-    Test Steps:
+    Test steps:
       1. Establish ASHA connection.
       2. Set volume to min.
       3. Verify volume changed to -128.

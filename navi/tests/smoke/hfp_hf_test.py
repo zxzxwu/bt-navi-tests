@@ -303,7 +303,9 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
       self.logger.info("[REF] Create SCO.")
       connection = ref_hfp_protocol.dlc.multiplexer.l2cap_channel.connection
       sco_links = asyncio.Queue[bumble_device.ScoLink]()
-      self.ref.device.on("sco_connection", sco_links.put_nowait)
+      self.ref.device.on(
+          self.ref.device.EVENT_SCO_CONNECTION, sco_links.put_nowait
+      )
       await self.ref.device.send_command(
           hci.HCI_Enhanced_Setup_Synchronous_Connection_Command(
               connection_handle=connection.handle, **esco_parameters.asdict()
@@ -377,7 +379,9 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
       self.logger.info("[REF] Wait for HFP connected.")
       async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
         ref_hfp_protocol = await self.ref_hfp_protocols.get()
-      ref_hfp_protocol.on("speaker_volume", ref_volumes.put_nowait)
+      ref_hfp_protocol.on(
+          ref_hfp_protocol.EVENT_SPEAKER_VOLUME, ref_volumes.put_nowait
+      )
 
       self.logger.info("[DUT] Wait for HFP connected.")
       await self._wait_for_hfp_state(dut_hfp_cb, _HfpState.CONNECTED)
@@ -438,7 +442,9 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
         ref_hfp_protocol = await self.ref_hfp_protocols.get()
 
       hf_indicators = asyncio.Queue[hfp.HfIndicatorState]()
-      ref_hfp_protocol.on("hf_indicator", hf_indicators.put_nowait)
+      ref_hfp_protocol.on(
+          ref_hfp_protocol.EVENT_HF_INDICATOR, hf_indicators.put_nowait
+      )
 
       self.logger.info("[DUT] Wait for HFP connected.")
       await self._wait_for_hfp_state(dut_cb, _HfpState.CONNECTED)

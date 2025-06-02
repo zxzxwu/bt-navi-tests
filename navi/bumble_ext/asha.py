@@ -195,7 +195,7 @@ class AshaService(gatt.TemplateService):
 
   # Handler for audio control commands
   async def _on_audio_control_point_write(
-      self, connection: bumble_device.Connection | None, value: bytes
+      self, connection: bumble_device.Connection, value: bytes
   ) -> None:
     del connection
     _logger.debug('--- AUDIO CONTROL POINT Write:%s', value.hex())
@@ -232,7 +232,7 @@ class AshaService(gatt.TemplateService):
 
   # Handler for volume control
   def _on_volume_write(
-      self, connection: bumble_device.Connection | None, value: bytes
+      self, connection: bumble_device.Connection, value: bytes
   ) -> None:
     del connection
     volume = struct.unpack('<b', value)[0]

@@ -16,7 +16,8 @@
 
 import asyncio
 import datetime
-
+from bumble import core
+from bumble import hci
 from typing_extensions import Self
 
 from navi.bumble_ext import crown
@@ -80,3 +81,49 @@ async def cleanup_connections(
       )
   # Leave a gap between tests.
   await asyncio.sleep(1.0)
+
+
+async def terminate_connection_from_dut(
+    dut: navi_test_base.AndroidSnippetDeviceWrapper,
+    ref: crown.CrownDevice
+) -> None:
+  """Terminates the connection from the DUT side.
+
+  Args:
+    dut: The Android device wrapper.
+    ref: The Crown device.
+  """
+  with dut.bl4a.register_callback(bl4a_api.Module.ADAPTER) as dut_cb:
+    dut.bt.disconnect(ref.address)
+    await dut_cb.wait_for_event(
+        bl4a_api.AclDisconnected(
+            address=ref.address,
+            transport=android_constants.Transport.CLASSIC,
+        ),
+    )
+
+
+async def terminate_connection_from_ref(
+    dut: navi_test_base.AndroidSnippetDeviceWrapper,
+    ref: crown.CrownDevice
+) -> None:
+  """Terminates the connection from the REF side.
+
+  Args:
+    dut: The Android device wrapper.
+    ref: The Crown device.
+  """
+  with dut.bl4a.register_callback(bl4a_api.Module.ADAPTER) as dut_cb:
+    ref_acl = ref.device.find_connection_by_bd_addr(
+        hci.Address(dut.address), transport=core.PhysicalTransport.BR_EDR
+    )
+    if ref_acl is None:
+      return
+
+    await ref_acl.disconnect()
+    await dut_cb.wait_for_event(
+        bl4a_api.AclDisconnected(
+            ref.address, transport=android_constants.Transport.CLASSIC
+        ),
+    )
+

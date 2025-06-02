@@ -146,7 +146,7 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
         )
 
     avdtp_listener = avdtp.Listener.for_device(self.ref.device)
-    avdtp_listener.on("connection", on_avdtp_connection)
+    avdtp_listener.on(avdtp_listener.EVENT_CONNECTION, on_avdtp_connection)
 
     self.ref_avrcp_delegator = a2dp_test.AvrcpDelegate(
         supported_events=(avrcp.EventId.VOLUME_CHANGED,)
@@ -281,7 +281,9 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
     )
 
     sco_links = asyncio.Queue[device.ScoLink]()
-    self.ref.device.on("sco_connection", sco_links.put_nowait)
+    self.ref.device.on(
+        self.ref.device.EVENT_SCO_CONNECTION, sco_links.put_nowait
+    )
 
     dut_player_cb = self.dut.bl4a.register_callback(_Module.PLAYER)
     self.test_case_context.push(dut_player_cb)
@@ -317,7 +319,9 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
         sco_link = await sco_links.get()
 
       sco_disconnected = asyncio.Event()
-      sco_link.once("disconnection", lambda *_: sco_disconnected.set())
+      sco_link.once(
+          sco_link.EVENT_DISCONNECTION, lambda *_: sco_disconnected.set()
+      )
 
       self.logger.info("[DUT] Terminate call.")
       call.close()

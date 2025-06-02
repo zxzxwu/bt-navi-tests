@@ -190,13 +190,16 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
     if self.dut.getprop(_AndroidProperty.BAP_UNICAST_CLIENT_ENABLED) != "true":
       raise signals.TestAbortClass("Unicast client is not enabled")
 
-    if self.dut.getprop(_AndroidProperty.LEAUDIO_BYPASS_ALLOW_LIST) != "true":
+    if (
+        self.dut.getprop(_AndroidProperty.LEAUDIO_BYPASS_ALLOW_LIST) != "true"
+        and not self.dut.getprop(_AndroidProperty.LEAUDIO_ALLOW_LIST)
+        and self.dut.getprop("ro.hardware") != "cutf_cvm"
+    ):
       # Allow list will not be used in the test, but here we still check if the
       # allow list is empty to make sure DUT is ready to use LE Audio.
-      if not self.dut.getprop(_AndroidProperty.LEAUDIO_ALLOW_LIST):
-        raise signals.TestAbortClass(
-            "Allow list is empty, DUT is probably not ready to use LE Audio."
-        )
+      raise signals.TestAbortClass(
+          "Allow list is empty, DUT is probably not ready to use LE Audio."
+      )
 
     self.ref.config.cis_enabled = True
     self.ref.device.cis_enabled = True

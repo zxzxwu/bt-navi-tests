@@ -78,7 +78,7 @@ uv pip install -e .
 
 #### Configure testbed
 
-NOTE: If you don't care the order, use testbed `any`, or let `test_runner` generate one.
+NOTE: If you don't care the order, use testbed `any`, or let `mobly_runner` generate one.
 
 Modify the test config file `config.yml` as follows:
 
@@ -120,10 +120,10 @@ device is `localhost:40155` and `localhost:46879`.
 This test suite has been integrated with [Mobly Android Partner Tools](https://github.com/android/mobly-android-partner-tools/tree/main), so it can be run with
 
 ```bash
-test_runner generic_functionality_suite -c config.yml -tb default -i [-u]
+mobly_runner generic_functionality_suite -c config.yml -tb default -i [-u]
 ```
 
-NOTE: If -c and -tb is not specified, Mobly test_runner will automatically select all devices with the order present in `adb devices`. Check `test_runner -h` for more details.
+NOTE: If -c and -tb is not specified, Mobly mobly_runner will automatically select all devices with the order present in `adb devices`. Check `mobly_runner -h` for more details.
 
 Or you may run the following commands from the local directory, but you need to manually install `bluetooth_snippet.apk` before running the test:
 
@@ -143,4 +143,14 @@ If you have partner GCP account, you can upload the test result to GCP with resu
 
 ```bash
 results_uploader /tmp/logs/mobly/...
+```
+
+### Get full logs
+
+To get all dumpsys, snoop, recorded audio, bugreports, add the following test params to config.yml:
+
+```yml
+      "TestParams": {
+        "record_full_data": True
+      }
 ```

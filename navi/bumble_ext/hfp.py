@@ -27,6 +27,10 @@ from navi.bumble_ext import rfcomm as rfcomm_ext
 
 _logger = logging.getLogger(__name__)
 
+
+# TODO: Remove this once the bug is fixed in Bumble.
+hfp.RESPONSE_CODES.discard("+BCS")
+
 ESCO_PARAMETERS_LC3_T2 = hfp.EscoParameters(
     transmit_coding_format=hci.CodingFormat(hci.CodecID.LC3),
     receive_coding_format=hci.CodingFormat(hci.CodecID.LC3),
@@ -117,9 +121,8 @@ class HfProtocol(hfp.HfProtocol):
   ) -> None:
     self.auto_accept_sco_request = auto_accept_sco_request
     if auto_accept_sco_request:
-      dlc.multiplexer.l2cap_channel.connection.device.on(
-          "sco_request", self._on_sco_request
-      )
+      device = dlc.multiplexer.l2cap_channel.connection.device
+      device.on(device.EVENT_SCO_REQUEST, self._on_sco_request)
     super().__init__(dlc=dlc, configuration=configuration)
 
   @override

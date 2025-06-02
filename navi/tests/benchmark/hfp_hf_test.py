@@ -12,58 +12,110 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-"""Tests related to Bluetooth HFP(Hands-Free Profile) AG role on Pixel."""
+"""Tests related to Bluetooth HFP(Hands-Free Profile) HF role on Pixel."""
 
 import statistics
 
 from bumble import core
+from bumble import hci
 from bumble import hfp
 from bumble import rfcomm
 from mobly import test_runner
 from mobly import signals
 from typing_extensions import override
 
-from navi.bumble_ext import hfp as hfp_ext
 from navi.tests import navi_test_base
 from navi.tests.benchmark import performance_tool
 from navi.utils import android_constants
 from navi.utils import bl4a_api
 
 
-_DEFAULT_STEP_TIMEOUT_SECONDS = 30.0
-_HFP_SDP_HANDLE = 1
+_Callback = bl4a_api.CallbackHandler
+_DEFAULT_STEP_TIMEOUT_SECONDS = 5.0
+_HFP_AG_SDP_HANDLE = 1
+_HFP_HF_ENABLED_PROPERTY = "bluetooth.profile.hfp.hf.enabled"
 _DEFAULT_REPEAT_TIMES = 50
+_HfpState = android_constants.ConnectionState
+_DEFAULT_AG_CONFIGURATION = hfp.AgConfiguration(
+    supported_ag_features=[
+        hfp.AgFeature.ENHANCED_CALL_STATUS,
+    ],
+    supported_ag_indicators=[
+        hfp.AgIndicatorState.call(),
+        hfp.AgIndicatorState.callsetup(),
+        hfp.AgIndicatorState.service(),
+        hfp.AgIndicatorState.signal(),
+        hfp.AgIndicatorState.roam(),
+        hfp.AgIndicatorState.callheld(),
+        hfp.AgIndicatorState.battchg(),
+    ],
+    supported_hf_indicators=[],
+    supported_ag_call_hold_operations=[],
+    supported_audio_codecs=[hfp.AudioCodec.CVSD],
+)
 
-_AudioCodec = hfp.AudioCodec
-_Module = bl4a_api.Module
 
-
-class HfpAgTest(navi_test_base.TwoDevicesTestBase):
+class HfpHfTest(navi_test_base.TwoDevicesTestBase):
 
   @override
   async def async_setup_class(self) -> None:
     await super().async_setup_class()
-    if self.dut.getprop(android_constants.Property.HFP_AG_ENABLED) != "true":
-      raise signals.TestAbortClass("HFP(AG) is not enabled on DUT.")
-    # Make sure Bumble is on.
-    await self.ref.open()
+    if self.dut.getprop(_HFP_HF_ENABLED_PROPERTY) != "true":
+      raise signals.TestAbortClass("DUT does not have HFP HF enabled.")
 
-  @override
-  async def async_teardown_test(self) -> None:
-    await super().async_teardown_test()
-    # Make sure Bumble is off to cancel any running tasks.
+  def _setup_ag_device(self, configuration: hfp.AgConfiguration) -> None:
+    def on_dlc(dlc: rfcomm.DLC):
+      hfp.AgProtocol(dlc, configuration)
+
+    self.ref.device.sdp_service_records = {
+        _HFP_AG_SDP_HANDLE: hfp.make_ag_sdp_records(
+            service_record_handle=_HFP_AG_SDP_HANDLE,
+            rfcomm_channel=rfcomm.Server(self.ref.device).listen(on_dlc),
+            configuration=configuration,
+        )
+    }
+
+  async def _connect_hfp_from_ref(
+      self, config: hfp.AgConfiguration
+  ) -> hfp.AgProtocol:
+    if not (
+        dut_ref_acl := self.ref.device.find_connection_by_bd_addr(
+            hci.Address(self.dut.address)
+        )
+    ):
+      self.logger.info("[REF] Connect.")
+      dut_ref_acl = await self.ref.device.connect(
+          self.dut.address,
+          core.BT_BR_EDR_TRANSPORT,
+          timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
+      )
+
+      self.logger.info("[REF] Authenticate and encrypt connection.")
+      await dut_ref_acl.authenticate()
+      await dut_ref_acl.encrypt()
+
+    sdp_record = await hfp.find_hf_sdp_record(dut_ref_acl)
+    if not sdp_record:
+      self.fail("DUT does not have HFP SDP record.")
+    rfcomm_channel = sdp_record[0]
+
+    self.logger.info("[REF] Found HFP RFCOMM channel %s.", rfcomm_channel)
+
+    self.logger.info("[REF] Open RFCOMM Channel.")
     async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
-      await self.ref.close()
+      multiplexer = await rfcomm.Client(dut_ref_acl).start()
+      dlc = await multiplexer.open_dlc(rfcomm_channel)
+    return hfp.AgProtocol(dlc, config)
 
-  @classmethod
-  def _default_hfp_configuration(cls) -> hfp.HfConfiguration:
-    return hfp.HfConfiguration(
-        supported_hf_features=[],
-        supported_hf_indicators=[],
-        supported_audio_codecs=[
-            _AudioCodec.CVSD,
-            _AudioCodec.MSBC,
-        ],
+  async def _wait_for_hfp_state(
+      self, dut_cb: _Callback, state: _HfpState
+  ) -> None:
+    self.logger.info("[DUT] Wait for HFP state %s.", state)
+    await dut_cb.wait_for_event(
+        bl4a_api.ProfileConnectionStateChanged(
+            address=self.ref.address,
+            state=state,
+        ),
     )
 
   async def pair_and_connect(self) -> None:
@@ -72,23 +124,16 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
     Test steps:
       1. Setup HFP on REF.
       2. Create bond from DUT.
-      3. Wait HFP connected on DUT.(Android should autoconnect HFP as AG)
+      3. Wait HFP connected on DUT.(Android should autoconnect HFP as HF)
     """
-    with (self.dut.bl4a.register_callback(_Module.HFP_AG) as dut_cb,):
-      hfp_ext.HfProtocol.setup_server(
-          self.ref.device,
-          sdp_handle=_HFP_SDP_HANDLE,
-          configuration=self._default_hfp_configuration(),
-      )
+    self._setup_ag_device(_DEFAULT_AG_CONFIGURATION)
 
-      self.logger.info("[DUT] Connect and pair REF.")
+    self.logger.info("[DUT] Connect and pair REF.")
+    with self.dut.bl4a.register_callback(bl4a_api.Module.HFP_HF) as dut_cb:
       await self.classic_connect_and_pair()
 
       self.logger.info("[DUT] Wait for HFP connected.")
-      await dut_cb.wait_for_event(
-          bl4a_api.ProfileActiveDeviceChanged(address=self.ref.address),
-          timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
-      )
+      await self._wait_for_hfp_state(dut_cb, _HfpState.CONNECTED)
 
   async def test_paired_connect_outgoing(self) -> None:
     """Tests HFP connection establishment where pairing is not involved.
@@ -104,18 +149,16 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
     success_count = 0
     latency_list = list[float]()
     await self.pair_and_connect()
-    await performance_tool.terminate_connection_from_dut(self.dut, self.ref)
+    await performance_tool.terminate_connection_from_ref(self.dut, self.ref)
     for i in range(_DEFAULT_REPEAT_TIMES):
       try:
-        with (self.dut.bl4a.register_callback(_Module.HFP_AG) as dut_cb,):
+        with self.dut.bl4a.register_callback(bl4a_api.Module.HFP_HF) as dut_cb:
           self.logger.info("[DUT] Reconnect.")
           with performance_tool.Stopwatch() as stop_watch:
             self.dut.bt.connect(self.ref.address)
             self.logger.info("[DUT] Wait for HFP connected.")
-            await dut_cb.wait_for_event(
-                bl4a_api.ProfileActiveDeviceChanged(address=self.ref.address),
-                timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
-            )
+            await self._wait_for_hfp_state(dut_cb, _HfpState.CONNECTED)
+
           latency_seconds = stop_watch.elapsed_time.total_seconds()
           self.logger.info(
               "Success connection in %.2f seconds", latency_seconds
@@ -126,7 +169,7 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       except (core.BaseBumbleError, AssertionError):
         self.logger.exception("Failed to make HFP connection")
       finally:
-        await performance_tool.terminate_connection_from_dut(self.dut, self.ref)
+        await performance_tool.terminate_connection_from_ref(self.dut, self.ref)
     self.logger.info(
         "[success rate] Passes: %d / Attempts: %d",
         success_count,
@@ -167,52 +210,15 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
     success_count = 0
     latency_list = list[float]()
     await self.pair_and_connect()
-    await performance_tool.terminate_connection_from_dut(self.dut, self.ref)
+    await performance_tool.terminate_connection_from_ref(self.dut, self.ref)
     for i in range(_DEFAULT_REPEAT_TIMES):
       try:
-        with (self.dut.bl4a.register_callback(_Module.HFP_AG) as dut_cb,):
-
+        with self.dut.bl4a.register_callback(bl4a_api.Module.HFP_HF) as dut_cb:
           self.logger.info("[DUT] Reconnect.")
           with performance_tool.Stopwatch() as stop_watch:
-            dut_ref_acl = await self.ref.device.connect(
-                self.dut.address,
-                core.BT_BR_EDR_TRANSPORT,
-                timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
-            )
-
-            self.logger.info("[REF] Authenticate and encrypt connection.")
-            await dut_ref_acl.authenticate()
-            await dut_ref_acl.encrypt()
-
-            rfcomm_channel = await rfcomm.find_rfcomm_channel_with_uuid(
-                dut_ref_acl, core.BT_HANDSFREE_AUDIO_GATEWAY_SERVICE
-            )
-            if rfcomm_channel is None:
-              self.fail("No HFP RFCOMM channel found on REF.")
-            self.logger.info(
-                "[REF] Found HFP RFCOMM channel %s.", rfcomm_channel
-            )
-
-            self.logger.info("[REF] Open RFCOMM Multiplexer.")
-            async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
-              multiplexer = await rfcomm.Client(dut_ref_acl).start()
-
-            self.logger.info("[REF] Open RFCOMM DLC.")
-            async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
-              dlc = await multiplexer.open_dlc(rfcomm_channel)
-
-            self.logger.info("[REF] Establish SLC.")
-            ref_hfp_protocol = hfp_ext.HfProtocol(
-                dlc, self._default_hfp_configuration()
-            )
-            async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
-              await ref_hfp_protocol.initiate_slc()
-
+            await self._connect_hfp_from_ref(_DEFAULT_AG_CONFIGURATION)
             self.logger.info("[DUT] Wait for HFP connected.")
-            await dut_cb.wait_for_event(
-                bl4a_api.ProfileActiveDeviceChanged(address=self.ref.address),
-                timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
-            )
+            await self._wait_for_hfp_state(dut_cb, _HfpState.CONNECTED)
           latency_seconds = stop_watch.elapsed_time.total_seconds()
           self.logger.info(
               "Success connection in %.2f seconds", latency_seconds
@@ -223,7 +229,7 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       except (core.BaseBumbleError, AssertionError):
         self.logger.exception("Failed to make HFP connection")
       finally:
-        await performance_tool.terminate_connection_from_dut(self.dut, self.ref)
+        await performance_tool.terminate_connection_from_ref(self.dut, self.ref)
     self.logger.info(
         "[success rate] Passes: %d / Attempts: %d",
         success_count,
