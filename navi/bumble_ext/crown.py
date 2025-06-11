@@ -238,10 +238,7 @@ class AndroidCrownAdapter(CrownAdapter):
         _HCI_PROXY_G3_PATH_PREFIX + abi_type
     )
     self.ad.adb.push([file_path, _HCI_PROXY_DEVICE_PATH], timeout=60)
-    if b'ok' not in self.ad.adb.shell(
-        f'test -x {_HCI_PROXY_DEVICE_PATH} && echo ok'
-    ):
-      self.ad.adb.shell(f'chmod +x {_HCI_PROXY_DEVICE_PATH}')
+    self.ad.adb.shell(f'chmod +x {_HCI_PROXY_DEVICE_PATH}')
 
     self._hci_proxy_process = subprocess.Popen(
         [

@@ -90,6 +90,7 @@ class Module(enum.Enum):
   MAP = enum.auto()
   SAP = enum.auto()
   PLAYER = enum.auto()
+  BQR = enum.auto()
 
 
 @dataclasses.dataclass
@@ -162,6 +163,8 @@ class CallbackHandler:
         handler = snippet.registerBassCallback()
       case Module.PLAYER:
         handler = snippet.registerPlayerListener()
+      case Module.BQR:
+        handler = snippet.registerBluetoothQualityReportCallback()
       case _:
         raise ValueError(f'Unsupported module: {module}')
     return cls(snippet=snippet, handler=handler, module=module)
@@ -195,6 +198,10 @@ class CallbackHandler:
         self.snippet.unregisterBassCallback(self.handler.callback_id)
       case Module.PLAYER:
         self.snippet.unregisterPlayerListener(self.handler.callback_id)
+      case Module.BQR:
+        self.snippet.unregisterBluetoothQualityReportCallback(
+            self.handler.callback_id
+        )
       case _:
         raise ValueError(f'Unsupported module: {self.module}')
 
@@ -227,13 +234,14 @@ class CallbackHandler:
     if isinstance(timeout, datetime.timedelta):
       timeout = timeout.total_seconds()
     if isinstance(event, type):
+      match_msg = ''
       if predicate:
-        match_msg = f' matching `{inspect.getsource(predicate).strip()}`'
-      else:
-        match_msg = ''
+        # inspect.getsource may raise OSError if source unavailable.
+        with contextlib.suppress(OSError):
+          match_msg = f'matching `{inspect.getsource(predicate).strip()}`'
       event_class = event
     else:
-      match_msg = f' == {event}'
+      match_msg = f'== {event}'
       event_class = event.__class__
 
     try:
@@ -428,7 +436,7 @@ class KeyEvent(JsonDeserializableEvent):
   key_code: int
   action: int
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.KEY_EVENT
+  EVENT_NAME = snippet_constants.KEY_EVENT
 
   @override
   @classmethod
@@ -446,7 +454,7 @@ class MotionEvent(JsonDeserializableEvent):
   x: float
   y: float
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.MOTION_EVENT
+  EVENT_NAME = snippet_constants.MOTION_EVENT
 
   @override
   @classmethod
@@ -470,13 +478,12 @@ class AclConnected(JsonDeserializableEvent):
   Attributes:
     address: mac address of remote device in string format.
     transport: transport of the connected connection.
-    EVENT_NAME: ClassVar, callback event name.
   """
 
   address: str
   transport: android_constants.Transport
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.ACL_CONNECTED
+  EVENT_NAME = snippet_constants.ACL_CONNECTED
 
   @override
   @classmethod
@@ -496,13 +503,12 @@ class AclDisconnected(JsonDeserializableEvent):
   Attributes:
     address: mac address of remote device in string format.
     transport: transport of the disconnected connection.
-    EVENT_NAME: ClassVar, callback event name.
   """
 
   address: str
   transport: android_constants.Transport
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.ACL_DISCONNECTED
+  EVENT_NAME = snippet_constants.ACL_DISCONNECTED
 
   @override
   @classmethod
@@ -522,13 +528,12 @@ class BondStateChanged(JsonDeserializableEvent):
   Attributes:
     address: mac address of remote device in string format.
     state: new bond state of remote device.
-    EVENT_NAME: ClassVar, callback event name.
   """
 
   address: str
   state: android_constants.BondState
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.BOND_STATE_CHANGE
+  EVENT_NAME = snippet_constants.BOND_STATE_CHANGE
 
   @override
   @classmethod
@@ -543,7 +548,7 @@ class BondStateChanged(JsonDeserializableEvent):
 
 @dataclasses.dataclass
 class A2dpPlayingStateChanged(JsonDeserializableEvent):
-  EVENT_NAME: ClassVar[str] = snippet_constants.A2DP_PLAYING_STATE_CHANGED
+  EVENT_NAME = snippet_constants.A2DP_PLAYING_STATE_CHANGED
 
   address: str
   state: android_constants.A2dpState
@@ -567,14 +572,13 @@ class PairingRequest(JsonDeserializableEvent):
     address: mac address of remote device in string format.
     variant: variant of pairing procedure.
     pin: pairing confirmation pin code.
-    EVENT_NAME: ClassVar, callback event name.
   """
 
   address: str
   variant: android_constants.PairingVariant
   pin: int
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.PAIRING_REQUEST
+  EVENT_NAME = snippet_constants.PAIRING_REQUEST
 
   @override
   @classmethod
@@ -595,13 +599,12 @@ class DeviceFound(JsonDeserializableEvent):
   Attributes:
     address: mac address of remote device in string format.
     name: name of remote device.
-    EVENT_NAME: ClassVar, callback event name.
   """
 
   address: str
   name: str
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.DEVICE_FOUND
+  EVENT_NAME = snippet_constants.DEVICE_FOUND
 
   @override
   @classmethod
@@ -619,13 +622,12 @@ class AudioDeviceAdded(JsonDeserializableEvent):
   Attributes:
     address: mac address of remote device in string format.
     device_type: type of audio device.
-    EVENT_NAME: ClassVar, callback event name.
   """
 
   address: str
   device_type: android_constants.AudioDeviceType
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.AUDIO_DEVICE_ADDED
+  EVENT_NAME = snippet_constants.AUDIO_DEVICE_ADDED
 
   @override
   @classmethod
@@ -643,7 +645,7 @@ class CommunicationDeviceChanged(JsonDeserializableEvent):
   address: str
   device_type: android_constants.AudioDeviceType
 
-  EVENT_NAME: ClassVar[str] = (
+  EVENT_NAME = (
       snippet_constants.AUDIO_COMMUNICATION_DEVICE_CHANGED
   )
 
@@ -665,13 +667,12 @@ class GattConnectionStateChanged(JsonDeserializableEvent):
   Attributes:
     state: new state of GATT connection.
     status: status or reason of state transition.
-    EVENT_NAME: ClassVar, callback event name.
   """
 
   state: android_constants.ConnectionState
   status: android_constants.GattStatus
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.GATT_CONNECTION_STATE_CHANGE
+  EVENT_NAME = snippet_constants.GATT_CONNECTION_STATE_CHANGE
 
   @override
   @classmethod
@@ -695,7 +696,6 @@ class GattCharacteristicReadRequest(JsonDeserializableEvent):
     characteristic_uuid: Characteristic UUID in string format.
     request_id: request ID required by send_response method.
     offset: offset of value in the request.
-    EVENT_NAME: ClassVar, callback event name.
   """
 
   address: str
@@ -703,7 +703,7 @@ class GattCharacteristicReadRequest(JsonDeserializableEvent):
   request_id: int
   offset: int
 
-  EVENT_NAME: ClassVar[str] = (
+  EVENT_NAME = (
       snippet_constants.GATT_SERVER_CHARACTERISTIC_READ_REQUEST
   )
 
@@ -730,7 +730,6 @@ class GattCharacteristicWriteRequest(JsonDeserializableEvent):
     value: what the remote wants to write.
     response_needed: whether response is required for this request.
     prepared_write: whether this is a prepared write.
-    EVENT_NAME: ClassVar, callback event name.
   """
 
   address: str
@@ -741,7 +740,7 @@ class GattCharacteristicWriteRequest(JsonDeserializableEvent):
   response_needed: bool
   prepared_write: bool
 
-  EVENT_NAME: ClassVar[str] = (
+  EVENT_NAME = (
       snippet_constants.GATT_SERVER_CHARACTERISTIC_WRITE_REQUEST
   )
 
@@ -772,7 +771,6 @@ class GattDescriptorWriteRequest(JsonDeserializableEvent):
     value: what the remote wants to write.
     response_needed: whether response is required for this request.
     prepared_write: whether this is a prepared write.
-    EVENT_NAME: ClassVar, callback event name.
   """
 
   address: str
@@ -784,7 +782,7 @@ class GattDescriptorWriteRequest(JsonDeserializableEvent):
   response_needed: bool
   prepared_write: bool
 
-  EVENT_NAME: ClassVar[str] = (
+  EVENT_NAME = (
       snippet_constants.GATT_SERVER_DESCRIPTOR_WRITE_REQUEST
   )
 
@@ -809,7 +807,7 @@ class GattCharacteristicChanged(JsonDeserializableEvent):
   handle: int
   value: bytes
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.GATT_CHARACTERISTIC_CHANGED
+  EVENT_NAME = snippet_constants.GATT_CHARACTERISTIC_CHANGED
 
   @classmethod
   def from_mapping(cls: Type[Self], mapping: Mapping[str, Any]) -> Self:
@@ -827,13 +825,12 @@ class VolumeChanged(JsonDeserializableEvent):
   Attributes:
     stream_type: type of stream.
     volume_value: index of volume for stream_type.
-    EVENT_NAME: ClassVar, callback event name.
   """
 
   stream_type: android_constants.StreamType
   volume_value: int
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.VOLUME_CHANGED
+  EVENT_NAME = snippet_constants.VOLUME_CHANGED
 
   @override
   @classmethod
@@ -854,14 +851,13 @@ class CallStateChanged(JsonDeserializableEvent):
     handle: uri handle of the call.
     name: displayed name of caller.
     state: state of the call.
-    EVENT_NAME: ClassVar, callback event name.
   """
 
   handle: str
   name: str
   state: android_constants.CallState
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.CALL_STATE_CHANGED
+  EVENT_NAME = snippet_constants.CALL_STATE_CHANGED
 
   @override
   @classmethod
@@ -882,13 +878,12 @@ class ProfileConnectionStateChanged(JsonDeserializableEvent):
   Attributes:
     address: mac address of remote device in string format.
     state: new bond state of remote device.
-    EVENT_NAME: ClassVar, callback event name.
   """
 
   address: str
   state: android_constants.ConnectionState
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.PROFILE_CONNECTION_STATE_CHANGE
+  EVENT_NAME = snippet_constants.PROFILE_CONNECTION_STATE_CHANGE
 
   @override
   @classmethod
@@ -905,7 +900,7 @@ class ProfileConnectionStateChanged(JsonDeserializableEvent):
 class ProfileActiveDeviceChanged(JsonDeserializableEvent):
   address: str | None = None
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.ACTIVE_DEVICE_CHANGED
+  EVENT_NAME = snippet_constants.ACTIVE_DEVICE_CHANGED
 
   @override
   @classmethod
@@ -920,10 +915,9 @@ class HfpAgAudioStateChanged(JsonDeserializableEvent):
   Attributes:
     address: mac address of remote device in string format.
     state: new bond state of remote device.
-    EVENT_NAME: ClassVar, callback event name.
   """
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.HFP_AG_AUDIO_STATE_CHANGED
+  EVENT_NAME = snippet_constants.HFP_AG_AUDIO_STATE_CHANGED
 
   address: str
   state: android_constants.ScoState
@@ -946,13 +940,12 @@ class HfpHfAudioStateChanged(JsonDeserializableEvent):
   Attributes:
     address: mac address of remote device in string format.
     state: new bond state of remote device.
-    EVENT_NAME: ClassVar, callback event name.
   """
 
   address: str
   state: android_constants.ConnectionState
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.HFP_HF_AUDIO_STATE_CHANGED
+  EVENT_NAME = snippet_constants.HFP_HF_AUDIO_STATE_CHANGED
 
   @override
   @classmethod
@@ -972,7 +965,7 @@ class BatteryLevelChanged(JsonDeserializableEvent):
   address: str
   level: int
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.BATTERY_LEVEL_CHANGED
+  EVENT_NAME = snippet_constants.BATTERY_LEVEL_CHANGED
 
   @override
   @classmethod
@@ -986,7 +979,7 @@ class BatteryLevelChanged(JsonDeserializableEvent):
 @dataclasses.dataclass
 class BroadcastSourceFound(JsonDeserializableEvent):
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.BASS_SOURCE_FOUND
+  EVENT_NAME = snippet_constants.BASS_SOURCE_FOUND
 
   source: auracast_uri.BroadcastAudioUri
 
@@ -1003,7 +996,7 @@ class BroadcastSourceFound(JsonDeserializableEvent):
 @dataclasses.dataclass
 class PlayerIsPlayingChanged(JsonDeserializableEvent):
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.PLAYER_IS_PLAYING_CHANGED
+  EVENT_NAME = snippet_constants.PLAYER_IS_PLAYING_CHANGED
 
   is_playing: bool
 
@@ -1016,7 +1009,7 @@ class PlayerIsPlayingChanged(JsonDeserializableEvent):
 @dataclasses.dataclass
 class PlayerMediaItemTransition(JsonDeserializableEvent):
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.PLAYER_MEDIA_ITEM_TRANSITION
+  EVENT_NAME = snippet_constants.PLAYER_MEDIA_ITEM_TRANSITION
 
   uri: str | None
 
@@ -1042,7 +1035,7 @@ class DistanceMeasurementResult(JsonDeserializableEvent):
   detected_attack_level: int | None = None
   measurement_timestamp_nanos: int | None = None
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.DISTANCE_MEASUREMENT_RESULT
+  EVENT_NAME = snippet_constants.DISTANCE_MEASUREMENT_RESULT
 
   @override
   @classmethod
@@ -1090,7 +1083,7 @@ class ScanResult(JsonDeserializableEvent):
   service_data: dict[str, bytes] | None = None
   manufacturer_data: dict[int, bytes] | None = None
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.SCAN_RESULT
+  EVENT_NAME = snippet_constants.SCAN_RESULT
 
   @override
   @classmethod
@@ -1155,12 +1148,72 @@ class ScanResult(JsonDeserializableEvent):
 
 
 @dataclasses.dataclass
+class BluetoothQualityReportReady(JsonDeserializableEvent):
+  """Dataclass for Bluetooth Quality Report Ready event metadata."""
+
+  @dataclasses.dataclass
+  class Common:
+    """Common fields for Bluetooth Quality Report."""
+
+    packet_type: int
+    connection_handle: int
+    connection_role: int
+    tx_power_level: int
+    rssi: int
+    snr: int
+    unused_afh_channel_count: int
+    afh_select_unideal_channel_count: int
+    lsto: int
+    piconet_clock: int
+    retransmission_count: int
+    no_rx_count: int
+    nak_count: int
+    last_tx_ack_timestamp: int
+    flow_off_count: int
+    last_flow_on_timestamp: int
+    overflow_count: int
+    underflow_count: int
+    cal_failed_item_count: int
+    # V6 fields
+    tx_total_packets: int | None = None
+    tx_unack_packets: int | None = None
+    tx_flush_packets: int | None = None
+    tx_last_subevent_packets: int | None = None
+    crc_error_packets: int | None = None
+    rx_dup_packets: int | None = None
+    rx_un_recv_packets: int | None = None
+    coex_info_mask: int | None = None
+
+  device: str
+  quality_report_id: int
+  status: int
+  common: Common | None
+
+  EVENT_NAME = snippet_constants.BLUETOOTH_QUALITY_REPORT
+
+  @override
+  @classmethod
+  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
+    report = mapping[snippet_constants.FIELD_REPORT]
+    return cls(
+        device=mapping[snippet_constants.FIELD_DEVICE],
+        status=mapping[snippet_constants.FIELD_STATUS],
+        quality_report_id=report[snippet_constants.FIELD_ID],
+        common=(
+            cls.Common(**report[snippet_constants.FIELD_COMMON])
+            if snippet_constants.FIELD_COMMON in report
+            else None
+        ),
+    )
+
+
+@dataclasses.dataclass
 class BatchScanResults(JsonDeserializableEvent):
   """LE Batch Scan result."""
 
   results: Sequence[ScanResult]
 
-  EVENT_NAME: ClassVar[str] = snippet_constants.BATCH_SCAN_RESULTS
+  EVENT_NAME = snippet_constants.BATCH_SCAN_RESULTS
 
   @override
   @classmethod
@@ -2158,6 +2211,24 @@ class GattClient(CallbackHandler):
         android_constants.Phy(event.data[snippet_constants.FIELD_TX_PHY]),
         android_constants.Phy(event.data[snippet_constants.FIELD_RX_PHY]),
     )
+
+  async def request_subrate_mode(
+      self, mode: android_constants.LeSubrateMode
+  ) -> android_constants.LeSubrateMode:
+    """Requests LE Subrate Mode.
+
+    Args:
+      mode: Target subrate mode.
+
+    Returns:
+      Updated subrate mode.
+
+    Raises:
+      ConnectionError: Unable to request subrate mode.
+    """
+    self.snippet.gattRequestSubrateMode(self.handler.callback_id, mode)
+    # TODO: Wait for subrate mode update event.
+    return mode
 
 
 _EVENT = TypeVar('_EVENT', bound=JsonDeserializableEvent)

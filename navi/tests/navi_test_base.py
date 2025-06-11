@@ -25,6 +25,7 @@ import logging
 import pathlib
 import re
 import secrets
+import sys
 from typing import Any, cast, ClassVar, final, Never, TypeAlias
 
 from absl.testing import absltest
@@ -227,6 +228,19 @@ def parameterized(
       testcase_name = ", ".join(
           [getattr(arg, "name", None) or str(arg) for arg in args]
       )
+      # Replace reserved characters with their Unicode equivalents.
+      if sys.platform == "win32":
+        testcase_name = (
+            testcase_name.replace(">", "＞")
+            .replace("<", "＜")
+            .replace(":", "：")
+            .replace('"', "'")
+            .replace("/", "／")
+            .replace("\\", "＼")
+            .replace("|", "｜")
+            .replace("?", "？")
+            .replace("*", "＊")
+        )
       param_sets[testcase_name] = (args, {})
     setattr(func, _NAVI_PARAMETERIZED, (False, param_sets))
     return func
