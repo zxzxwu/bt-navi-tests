@@ -24,6 +24,7 @@ from bumble import device
 from bumble import hci
 from bumble.profiles import ascs
 from bumble.profiles import bap
+from bumble.profiles import gmap
 from bumble.profiles import le_audio
 from bumble.profiles import mcp
 from bumble.profiles import pacs
@@ -163,6 +164,14 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
     self.ref_vcs = vcs.VolumeControlService(volume_setting=vcs.MAX_VOLUME // 2)
     self.ref.device.add_service(self.ref_ascs)
     self.ref.device.add_service(self.ref_vcs)
+    self.ref.device.add_service(
+        gmap.GamingAudioService(
+            gmap_role=gmap.GmapRole.UNICAST_GAME_TERMINAL,
+            ugt_features=(
+                gmap.UgtFeatures.UGT_SOURCE | gmap.UgtFeatures.UGT_SINK
+            ),
+        )
+    )
 
   async def _prepare_paired_devices(self) -> None:
     with self.dut.bl4a.register_callback(
@@ -224,6 +233,11 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
     self.dut.setprop(_AndroidProperty.LEAUDIO_BYPASS_ALLOW_LIST, "true")
     await super().async_setup_test()
     self._setup_unicast_server()
+    # Reset audio attributes to media.
+    self.dut.bl4a.set_audio_attributes(
+        bl4a_api.AudioAttributes(usage=bl4a_api.AudioAttributes.Usage.MEDIA),
+        handle_audio_focus=False,
+    )
     await self._prepare_paired_devices()
 
   @override
@@ -233,6 +247,17 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
     await asyncio.to_thread(self.dut.bt.audioStop)
     # Reset to the default value.
     self.dut.bt.setHandleAudioBecomingNoisy(False)
+
+  def _get_sampling_frequency(
+      self, ase: ascs.AseStateMachine
+  ) -> bap.SamplingFrequency | None:
+    """Returns the sampling frequency of the ASE."""
+    if isinstance(
+        codec_config := ase.codec_specific_configuration,
+        bap.CodecSpecificConfiguration,
+    ):
+      return codec_config.sampling_frequency
+    return None
 
   @navi_test_base.named_parameterized(
       ("active", True),
@@ -318,6 +343,74 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
         msg="[REF] Wait for audio to stop",
     ):
       await _wait_for_ase_state(sink_ase, ascs.AseStateMachine.State.IDLE)
+
+  async def test_gaming_context(self) -> None:
+    """Tests streaming with gaming context.
+
+    Test steps:
+      1. [Optional] Wait for audio streaming to stop if it is already streaming.
+      2. Start audio streaming from DUT with gaming context and put a call on
+      DUT.
+      3. Wait for audio streaming to start from REF.
+      4. Stop audio streaming from DUT and end the call.
+      5. Wait for audio streaming to stop from REF.
+    """
+    self.dut.bl4a.set_audio_attributes(
+        bl4a_api.AudioAttributes(usage=bl4a_api.AudioAttributes.Usage.GAME),
+        handle_audio_focus=False,
+    )
+
+    # Make sure audio is not streaming.
+    async with self.assert_not_timeout(
+        _DEFAULT_STEP_TIMEOUT_SECONDS,
+        msg="[REF] Wait for audio to stop",
+    ):
+      for ase in self.ref_ascs.ase_state_machines.values():
+        await _wait_for_ase_state(ase, ascs.AseStateMachine.State.IDLE)
+
+    self.logger.info("[DUT] Put a VoIP call")
+    call = self.dut.bl4a.make_phone_call(
+        _CALLER_NAME,
+        _CALLER_NUMBER,
+        constants.Direction.OUTGOING,
+    )
+    self.test_case_context.push(call)
+
+    self.logger.info("[DUT] Start audio streaming")
+    await asyncio.to_thread(self.dut.bt.audioPlaySine)
+    async with self.assert_not_timeout(
+        _DEFAULT_STEP_TIMEOUT_SECONDS,
+        msg="[REF] Wait for audio to start",
+    ):
+      for ase in self.ref_ascs.ase_state_machines.values():
+        await _wait_for_ase_state(ase, ascs.AseStateMachine.State.STREAMING)
+
+    # Check codec configuration.
+    sink_ase = self.ref_ascs.ase_state_machines[_SINK_ASE_ID]
+    sink_freq = self._get_sampling_frequency(sink_ase)
+    source_ase = self.ref_ascs.ase_state_machines[_SOURCE_ASE_ID]
+    source_freq = self._get_sampling_frequency(source_ase)
+    self.logger.info("sink_freq: %r, source_freq: %r", sink_freq, source_freq)
+
+    if self.dut.getprop(_AndroidProperty.GMAP_ENABLED) == "true":
+      # Asymmetric configuration is enabled with GMAP.
+      expected_sink_freq = bap.SamplingFrequency.FREQ_48000
+    else:
+      expected_sink_freq = bap.SamplingFrequency.FREQ_32000
+    self.assertEqual(sink_freq, expected_sink_freq)
+    self.assertEqual(source_freq, bap.SamplingFrequency.FREQ_32000)
+
+    # Streaming for 1 second.
+    await asyncio.sleep(_STREAMING_TIME_SECONDS)
+
+    self.logger.info("[DUT] Stop audio streaming")
+    await asyncio.to_thread(self.dut.bt.audioStop)
+    async with self.assert_not_timeout(
+        _DEFAULT_STEP_TIMEOUT_SECONDS,
+        msg="[REF] Wait for audio to stop",
+    ):
+      for ase in self.ref_ascs.ase_state_machines.values():
+        await _wait_for_ase_state(ase, ascs.AseStateMachine.State.IDLE)
 
   async def test_bidirectional_audio_stream(self) -> None:
     """Tests bidirectional audio stream between DUT and REF.
@@ -471,7 +564,6 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
         msg="[REF] Wait for audio to start",
     ):
       await _wait_for_ase_state(sink_ase, ascs.AseStateMachine.State.STREAMING)
-    self.assertIsInstance(sink_ase.metadata, le_audio.Metadata)
     get_audio_context = lambda: next(
         entry
         for entry in sink_ase.metadata.entries

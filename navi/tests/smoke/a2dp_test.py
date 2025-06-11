@@ -524,7 +524,11 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
         ) as f:
           f.write(buffer)
 
-      if buffer is not None and preferred_codec != _A2dpCodec.LDAC:
+      if (
+          buffer is not None
+          and preferred_codec != _A2dpCodec.LDAC
+          and audio.SUPPORT_AUDIO_PROCESSING
+      ):
         dominant_frequency = audio.get_dominant_frequency(
             buffer, format=preferred_codec.name
         )

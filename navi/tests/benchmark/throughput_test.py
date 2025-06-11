@@ -14,7 +14,6 @@
 
 import asyncio
 import logging
-import pathlib
 
 from bumble import gatt
 from bumble import gatt_client as gatt_client_module
@@ -30,7 +29,6 @@ from typing_extensions import override
 
 from navi.tests import navi_test_base
 from navi.tests.benchmark import performance_tool
-from navi.utils import adb_snippets
 from navi.utils import android_constants
 from navi.utils import bl4a_api
 
@@ -97,20 +95,6 @@ class ThroughputTest(navi_test_base.TwoDevicesTestBase):
             )
         )
     )
-
-  @override
-  async def async_teardown_test(self) -> None:
-    await super().async_teardown_test()
-    adb_snippets.download_btsnoop(
-        self.dut.device, self.current_test_info.output_path
-    )
-
-    # Dump Bumble snoop logs.
-    with open(
-        pathlib.Path(self.current_test_info.output_path, "bumble_btsnoop.log"),
-        "wb",
-    ) as f:
-      f.write(self.ref.snoop_buffer.getbuffer())
 
   @override
   def on_fail(self, record: records.TestResultRecord) -> None:

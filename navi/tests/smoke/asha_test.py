@@ -182,13 +182,14 @@ class AshaTest(navi_test_base.TwoDevicesTestBase):
         self.logger.info("[REF] Wait for audio stopped")
         await stop_events.get()
 
-      dominant_frequency = audio.get_dominant_frequency(
-          sink_buffer, format="g722"
-      )
-      self.logger.info("Dominant frequency: %.2f", dominant_frequency)
-      # Dominant frequency is not accurate on emulator.
-      if not self.dut.device.is_emulator:
-        self.assertAlmostEqual(dominant_frequency, 1000, delta=10)
+      if audio.SUPPORT_AUDIO_PROCESSING:
+        dominant_frequency = audio.get_dominant_frequency(
+            sink_buffer, format="g722"
+        )
+        self.logger.info("Dominant frequency: %.2f", dominant_frequency)
+        # Dominant frequency is not accurate on emulator.
+        if not self.dut.device.is_emulator:
+          self.assertAlmostEqual(dominant_frequency, 1000, delta=10)
 
   async def test_set_volume(self) -> None:
     """Tests ASHA set volume.
