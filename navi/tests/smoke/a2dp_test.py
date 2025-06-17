@@ -19,6 +19,7 @@ import decimal
 import enum
 import functools
 import os
+import sys
 import tempfile
 from typing import Iterable, TypeAlias
 import wave
@@ -524,7 +525,11 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
         ) as f:
           f.write(buffer)
 
-      if buffer is not None and preferred_codec != _A2dpCodec.LDAC:
+      if (
+          buffer is not None
+          and preferred_codec != _A2dpCodec.LDAC
+          and audio.SUPPORT_AUDIO_PROCESSING
+      ):
         dominant_frequency = audio.get_dominant_frequency(
             buffer, format=preferred_codec.name
         )
@@ -624,7 +629,11 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
     # Allow repeating to avoid the end of the track.
     self.dut.bt.audioSetRepeat(android_constants.RepeatMode.ONE)
     # Generate a sine wave audio file, and push it to DUT twice.
-    with tempfile.NamedTemporaryFile() as local_file:
+    with tempfile.NamedTemporaryFile(
+        # On Windows, NamedTemporaryFile cannot be deleted if used multiple
+        # times.
+        delete=(sys.platform != "win32")
+    ) as local_file:
       with wave.open(local_file.name, "wb") as wave_file:
         wave_file.setnchannels(1)
         wave_file.setsampwidth(2)

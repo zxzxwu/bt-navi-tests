@@ -580,7 +580,7 @@ class LePairingTest(navi_test_base.TwoDevicesTestBase):
         )
         ref_answer = dut_pairing_event.pin if ref_accept else None
         dut_answer = lambda: self.dut.bt.setPin(
-            ref_addr, f'{ref_pairing_event.arg}:06'
+            ref_addr, f'{ref_pairing_event.arg:06}'
         )
       case _:
         raise ValueError(f'Unsupported IO capability: {ref_io_capability}')

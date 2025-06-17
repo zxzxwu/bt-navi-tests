@@ -44,15 +44,39 @@ This is a test suite for Bluetooth on Android devices.
     ```
 
   * ADB
-    * If you don't already have the `adb` command-line tool, download and
-      install it from
-      [Android SDK Platform Tools](https://developer.android.com/tools/releases/platform-tools#downloads).
-    * Make sure that the installed binary is in the host's `PATH`, so it can
-      be run directly with `adb` in the command line.
+
+    If you don't already have the `adb` command-line tool, you may install using package managers
+
+    ```bash
+    # Ubuntu
+    sudo apt install android-tools-adb
+
+    # Windows
+    winget install --id=Google.PlatformTools -e
+    ```
+
+    Or, manually download and install it from
+      [Android SDK Platform Tools](https://developer.android.com/tools/releases/platform-tools#downloads), and add them to your PATH.
 
   * FFmpeg
 
+    If you don't already have the `ffmpeg` command-line tool, you may install using package managers
+
+    ```bash
+    # Ubuntu
+    sudo apt install ffmpeg
+
+    # Windows
+    winget install --id=Gyan.FFmpeg  -e
+    ```
+
+    Or, manually download and install it from
+
     Some of cases need FFmpeg. Please download them from <https://ffmpeg.org/download.html> and add the binary to your PATH.
+
+  * Windows
+
+    On Windows, you may also need to enable Global UTF-8 support in `Control Panel > Clock and Region > Region > Administrative tab > Change system locale button > enable Beta:Use Unicode UTF-8 for worldwide language support`, or some UTF-8 IO will break the test.
 
 ## Test steps
 

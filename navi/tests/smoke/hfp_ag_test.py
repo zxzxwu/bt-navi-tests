@@ -307,18 +307,6 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
     # PCM frame size = sample_rate * frame_duration (7.5ms) * sample_width (2)
     pcm_frame_size = int(sample_rate * _HFP_FRAME_DURATION * 2)
 
-    sine_tone_batch_iterator = itertools.cycle(
-        audio.batched(
-            audio.generate_sine_tone(
-                frequency=1000,
-                duration=1.0,
-                sample_rate=sample_rate,
-                data_type="int16",
-            ),
-            n=pcm_frame_size,
-        )
-    )
-
     dut_hfp_cb = self.dut.bl4a.register_callback(_Module.HFP_AG)
     dut_telecom_cb = self.dut.bl4a.register_callback(_Module.TELECOM)
     self.test_case_context.push(dut_hfp_cb)
@@ -369,6 +357,8 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       recorder = await asyncio.to_thread(
           lambda: self.dut.bl4a.start_audio_recording(_RECORDING_PATH)
       )
+      # Make sure the recorder is closed after the test.
+      self.test_case_context.push(recorder)
 
       esco_parameters = await ref_hfp_protocol.get_esco_parameters()
       check_audio_correctness = (
@@ -376,9 +366,21 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
           esco_parameters.input_coding_format.codec_id == hci.CodecID.LINEAR_PCM
           # Skip audio correctness check on emulators.
           and not self.dut.device.is_emulator
+          and audio.SUPPORT_AUDIO_PROCESSING
       )
       ref_sink_buffer = bytearray()
       if check_audio_correctness:
+        sine_tone_batch_iterator = itertools.cycle(
+            audio.batched(
+                audio.generate_sine_tone(
+                    frequency=1000,
+                    duration=1.0,
+                    sample_rate=sample_rate,
+                    data_type="int16",
+                ),
+                n=pcm_frame_size,
+            )
+        )
 
         async def source_streamer() -> None:
           while sco_link.handle in self.ref.device.sco_links:
@@ -724,6 +726,8 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
     """
     if self._is_ranchu_emulator(self.dut.device):
       self.skipTest("Volume control is not supported on Ranchu emulator")
+    if self.dut.device.is_emulator and issuer == constants.TestRole.DUT:
+      self.skipTest("b/420835576: Volume control from DUT is broken")
 
     # [REF] Setup HFP.
     hfp_configuration = hfp.HfConfiguration(

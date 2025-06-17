@@ -123,6 +123,7 @@ class HfProtocol(hfp.HfProtocol):
     if auto_accept_sco_request:
       device = dlc.multiplexer.l2cap_channel.connection.device
       device.on(device.EVENT_SCO_REQUEST, self._on_sco_request)
+      dlc.once(dlc.EVENT_CLOSE, self._on_disconnection)
     super().__init__(dlc=dlc, configuration=configuration)
 
   @override
@@ -136,6 +137,10 @@ class HfProtocol(hfp.HfProtocol):
     connection.abort_on(
         "disconnection", self.execute_command(f"AT+BCS={codec_id}")
     )
+
+  def _on_disconnection(self) -> None:
+    device = self.dlc.multiplexer.l2cap_channel.connection.device
+    device.remove_listener(device.EVENT_SCO_REQUEST, self._on_sco_request)
 
   async def _on_sco_request(
       self, connection: bumble.device.Connection, link_type: int
