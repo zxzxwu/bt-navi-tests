@@ -154,6 +154,11 @@ constants {
 }
 
 constants {
+  name: "UUID_CHANGED"
+  string_value: "UUID_CHANGED"
+}
+
+constants {
   name: "ACL_CONNECTED"
   string_value: "ACL_CONNECTED"
 }

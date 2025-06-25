@@ -18,7 +18,6 @@ import asyncio
 import decimal
 import enum
 import functools
-import os
 import sys
 import tempfile
 from typing import Iterable, TypeAlias
@@ -513,17 +512,11 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
         await ref_sink.condition.wait_for(
             lambda: ref_sink.last_command == LocalSinkWrapper.Command.SUSPEND
         )
-
-      if self.user_params.get("record_full_data") and buffer is not None:
-        self.logger.info("[DUT] Saving buffer.")
-        with open(
-            os.path.join(
-                self.current_test_info.output_path,
-                f"a2dp_data.{preferred_codec.name.lower()}",
-            ),
-            "wb",
-        ) as f:
-          f.write(buffer)
+      if self.user_params.get(navi_test_base.RECORD_FULL_DATA) and buffer:
+        self.write_test_output_data(
+            f"a2dp_data.{preferred_codec.name.lower()}",
+            buffer,
+        )
 
       if (
           buffer is not None

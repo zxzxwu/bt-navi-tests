@@ -37,6 +37,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
+import android.os.ParcelUuid
 import android.util.Log
 import androidx.test.platform.app.InstrumentationRegistry
 import com.google.android.mobly.snippet.Snippet
@@ -176,6 +177,7 @@ class BluetoothAdapterSnippet : Snippet {
         addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
         addAction(BluetoothDevice.ACTION_FOUND)
         addAction(BluetoothDevice.ACTION_BATTERY_LEVEL_CHANGED)
+        addAction(BluetoothDevice.ACTION_UUID)
       }
     broadcastReceivers[callbackId] =
       object : BroadcastReceiver() {
@@ -222,6 +224,18 @@ class BluetoothAdapterSnippet : Snippet {
                   SnippetConstants.FIELD_VALUE,
                   intent.getIntExtra(BluetoothDevice.EXTRA_BATTERY_LEVEL, BluetoothDevice.ERROR),
                 )
+              }
+            BluetoothDevice.ACTION_UUID ->
+              postSnippetEvent(callbackId, SnippetConstants.UUID_CHANGED) {
+                putString(SnippetConstants.FIELD_DEVICE, device?.address)
+                intent
+                  .getParcelableArrayExtra(BluetoothDevice.EXTRA_UUID, ParcelUuid::class.java)
+                  ?.let { uuids ->
+                    putStringArray(
+                      SnippetConstants.FIELD_UUID,
+                      uuids.map { it.uuid.toString() }.toTypedArray(),
+                    )
+                  }
               }
           }
         }
@@ -277,6 +291,12 @@ class BluetoothAdapterSnippet : Snippet {
           addressType ?: BluetoothDevice.ADDRESS_TYPE_RANDOM,
         )
       BluetoothDevice.TRANSPORT_BREDR -> bluetoothAdapter.getRemoteDevice(address)
+      BluetoothDevice.TRANSPORT_AUTO ->
+        if (addressType == null) {
+          bluetoothAdapter.getRemoteDevice(address)
+        } else {
+          bluetoothAdapter.getRemoteLeDevice(address, addressType)
+        }
       else -> throw IllegalArgumentException("Invalid transport type $transport")
     }.createBond(transport)
   }

@@ -29,11 +29,7 @@ dev = ["mypy == 1.15.0"]
 generic_functionality_suite = "navi.tests.generic_functionality_suite:main"
 
 [tool.setuptools]
-py-modules = ["_build"]
 packages = ["navi"]
-
-[tool.setuptools.cmdclass]
-build_py = "_build.build_py"
 
 [tool.setuptools.package-data]
 "*" = ["*.pyi", "py.typed", "*.json", "*.mp3", "android_hci_proxy_*", "*.apk"]

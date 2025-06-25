@@ -59,6 +59,7 @@
                        com.google.wireless.android.pixel.bluetooth.snippet.BluetoothRfcommSnippet,
                        com.google.wireless.android.pixel.bluetooth.snippet.DistanceMeasurementSnippet,
                        com.google.wireless.android.pixel.bluetooth.snippet.InputSnippet,
+                       com.google.wireless.android.pixel.bluetooth.snippet.OtherSnippet,
                        com.google.wireless.android.pixel.bluetooth.snippet.TelecomSnippet" />
     <service
         android:name=".InCallServiceImpl"

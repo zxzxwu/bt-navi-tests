@@ -537,7 +537,7 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
       sink_ase_states.extend(
           pyee_extensions.EventTriggeredValueObserver(
               ase,
-              "state_change",
+              ase.EVENT_STATE_CHANGE,
               functools.partial(
                   lambda ase: cast(ascs.AseStateMachine, ase).state, ase
               ),
@@ -590,7 +590,7 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
       ase_states.extend(
           pyee_extensions.EventTriggeredValueObserver(
               ase,
-              "state_change",
+              ase.EVENT_STATE_CHANGE,
               functools.partial(
                   lambda ase: cast(ascs.AseStateMachine, ase).state, ase
               ),
@@ -666,7 +666,7 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
     sink_ase_states = [
         pyee_extensions.EventTriggeredValueObserver(
             ase,
-            "state_change",
+            ase.EVENT_STATE_CHANGE,
             functools.partial(
                 lambda ase: cast(ascs.AseStateMachine, ase).state, ase
             ),
@@ -749,7 +749,7 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
       sink_ase_states.extend(
           pyee_extensions.EventTriggeredValueObserver(
               ase,
-              "state_change",
+              ase.EVENT_STATE_CHANGE,
               functools.partial(
                   lambda ase: cast(ascs.AseStateMachine, ase).state, ase
               ),
@@ -773,8 +773,10 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
                 )
             ),
         )
-      self.logger.info("[REF] Wait for ASE to be streaming")
-      await sink_ase.wait_for_target_value(ascs.AseStateMachine.State.STREAMING)
+        self.logger.info("[REF] Wait for ASE to be streaming")
+        await sink_ase.wait_for_target_value(
+            ascs.AseStateMachine.State.STREAMING
+        )
 
   async def test_volume_initialization(self) -> None:
     """Makes sure DUT sets the volume correctly after connecting to REF."""
@@ -873,7 +875,7 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
             )
             await pyee_extensions.EventTriggeredValueObserver[int](
                 ref_vcs_service,
-                "volume_state_change",
+                ref_vcs_service.EVENT_VOLUME_STATE_CHANGE,
                 functools.partial(get_volume_setting, ref_vcs_service),
             ).wait_for_target_value(ref_volume)
         # Only when remote device sets volume, DUT can receive the intent.

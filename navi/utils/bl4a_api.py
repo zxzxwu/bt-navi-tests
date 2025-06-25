@@ -19,7 +19,7 @@ from __future__ import annotations
 import abc
 import asyncio
 import base64
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Coroutine, Mapping, Sequence
 import contextlib
 import dataclasses
 import datetime
@@ -91,6 +91,8 @@ class Module(enum.Enum):
   SAP = enum.auto()
   PLAYER = enum.auto()
   BQR = enum.auto()
+  A2DP_SINK = enum.auto()
+  AVRCP_CONTROLLER = enum.auto()
 
 
 @dataclasses.dataclass
@@ -165,6 +167,14 @@ class CallbackHandler:
         handler = snippet.registerPlayerListener()
       case Module.BQR:
         handler = snippet.registerBluetoothQualityReportCallback()
+      case Module.A2DP_SINK:
+        handler = snippet.registerProfileCallback(
+            android_constants.Profile.A2DP_SINK
+        )
+      case Module.AVRCP_CONTROLLER:
+        handler = snippet.registerProfileCallback(
+            android_constants.Profile.AVRCP_CONTROLLER
+        )
       case _:
         raise ValueError(f'Unsupported module: {module}')
     return cls(snippet=snippet, handler=handler, module=module)
@@ -192,7 +202,14 @@ class CallbackHandler:
         self.snippet.unregisterHidHostCallback(self.handler.callback_id)
       case Module.PAN:
         self.snippet.unregisterPanCallback(self.handler.callback_id)
-      case Module.ASHA | Module.PBAP | Module.MAP | Module.SAP:
+      case (
+          Module.ASHA
+          | Module.PBAP
+          | Module.MAP
+          | Module.SAP
+          | Module.A2DP_SINK
+          | Module.AVRCP_CONTROLLER
+      ):
         self.snippet.unregisterProfileCallback(self.handler.callback_id)
       case Module.BASS:
         self.snippet.unregisterBassCallback(self.handler.callback_id)
@@ -547,6 +564,22 @@ class BondStateChanged(JsonDeserializableEvent):
 
 
 @dataclasses.dataclass
+class UuidChanged(JsonDeserializableEvent):
+  address: str
+  uuids: list[str] | None
+
+  EVENT_NAME = snippet_constants.UUID_CHANGED
+
+  @override
+  @classmethod
+  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
+    return cls(
+        address=mapping[snippet_constants.FIELD_DEVICE],
+        uuids=mapping.get(snippet_constants.FIELD_UUID),
+    )
+
+
+@dataclasses.dataclass
 class A2dpPlayingStateChanged(JsonDeserializableEvent):
   EVENT_NAME = snippet_constants.A2DP_PLAYING_STATE_CHANGED
 
@@ -644,10 +677,7 @@ class AudioDeviceAdded(JsonDeserializableEvent):
 class CommunicationDeviceChanged(JsonDeserializableEvent):
   address: str
   device_type: android_constants.AudioDeviceType
-
-  EVENT_NAME = (
-      snippet_constants.AUDIO_COMMUNICATION_DEVICE_CHANGED
-  )
+  EVENT_NAME = snippet_constants.AUDIO_COMMUNICATION_DEVICE_CHANGED
 
   @override
   @classmethod
@@ -703,9 +733,7 @@ class GattCharacteristicReadRequest(JsonDeserializableEvent):
   request_id: int
   offset: int
 
-  EVENT_NAME = (
-      snippet_constants.GATT_SERVER_CHARACTERISTIC_READ_REQUEST
-  )
+  EVENT_NAME = snippet_constants.GATT_SERVER_CHARACTERISTIC_READ_REQUEST
 
   @override
   @classmethod
@@ -740,9 +768,7 @@ class GattCharacteristicWriteRequest(JsonDeserializableEvent):
   response_needed: bool
   prepared_write: bool
 
-  EVENT_NAME = (
-      snippet_constants.GATT_SERVER_CHARACTERISTIC_WRITE_REQUEST
-  )
+  EVENT_NAME = snippet_constants.GATT_SERVER_CHARACTERISTIC_WRITE_REQUEST
 
   @override
   @classmethod
@@ -782,9 +808,7 @@ class GattDescriptorWriteRequest(JsonDeserializableEvent):
   response_needed: bool
   prepared_write: bool
 
-  EVENT_NAME = (
-      snippet_constants.GATT_SERVER_DESCRIPTOR_WRITE_REQUEST
-  )
+  EVENT_NAME = snippet_constants.GATT_SERVER_DESCRIPTOR_WRITE_REQUEST
 
   @override
   @classmethod
@@ -1553,6 +1577,27 @@ def find_characteristic_by_uuid(
   return characteristic
 
 
+def _schedule_rpc(
+    snippet: snippet_stub.BluetoothSnippet,
+    method_name: str,
+    args: Sequence[Any],
+    delay_ms: int = 0,
+) -> Coroutine[None, None, str]:
+  """Calls a snippet method asynchronously."""
+  handler = snippet.scheduleRpc(method_name, delay_ms, args)
+
+  async def wait_for_result() -> str:
+    response: callback_event.CallbackEvent = await asyncio.to_thread(
+        lambda: handler.waitAndGet(method_name)
+    )
+    # Mobly doesn't parse JSON events, so they are remained as strings.
+    if (error := response.data['error']) != 'null':
+      raise errors.SnippetError(error)
+    return response.data['result']
+
+  return wait_for_result()
+
+
 class PhoneCall:
   """Context managable phone call wrapper."""
 
@@ -1762,12 +1807,12 @@ class RfcommChannel:
   cookie: str
 
   @classmethod
-  async def connect_with_channel_number(
+  async def connect(
       cls: Type[Self],
       snippet: snippet_stub.BluetoothSnippet,
       address: str,
       secure: bool,
-      channel: int,
+      channel_or_uuid: int | str,
       retry_count: int = _DEFAULT_RETRY_COUNT,
   ) -> Self:
     """Connects an RFCOMM channel.
@@ -1776,7 +1821,7 @@ class RfcommChannel:
       snippet: snippet client instance.
       address: address of target device.
       secure: whether encryption is required.
-      channel: channel number of the RFCOMM channel.
+      channel_or_uuid: channel number or UUID of the RFCOMM channel.
       retry_count: allowed retry count of connect attempts.
 
     Returns:
@@ -1785,65 +1830,65 @@ class RfcommChannel:
     Raises:
       ConnectionError: RFCOMM is not connected after allowed retry counts.
     """
+    if isinstance(channel_or_uuid, int):
+      method = lambda: snippet.rfcommConnectWithChannel(
+          address, secure, channel_or_uuid
+      )
+    elif isinstance(channel_or_uuid, str):
+      method = lambda: snippet.rfcommConnectWithUuid(
+          address, secure, channel_or_uuid
+      )
+    else:
+      raise ValueError(f'Unsupported channel_or_uuid: {channel_or_uuid}')
 
     @retry.retry_on_exception(
         initial_delay_sec=_DEFAULT_RETRY_DELAY_SECONDS,
         num_retries=retry_count,
     )
-    async def inner():
-      with contextlib.suppress(mobly.snippet.errors.ApiError):
-        cookie = await asyncio.to_thread(
-            snippet.rfcommConnectWithChannel,
-            address,
-            secure,
-            channel,
-        )
+    async def inner() -> Self:
+      try:
+        cookie = await asyncio.to_thread(method)
         return cls(snippet=snippet, cookie=cookie)
-      raise errors.ConnectionError('Unable to connect RFCOMM')
+      except mobly.snippet.errors.ApiError as e:
+        raise errors.ConnectionError('Unable to connect RFCOMM') from e
 
     return await inner()
 
   @classmethod
-  async def connect_with_service_record(
+  def connect_async(
       cls: Type[Self],
       snippet: snippet_stub.BluetoothSnippet,
       address: str,
       secure: bool,
-      uuid: str,
-      retry_count: int = _DEFAULT_RETRY_COUNT,
-  ) -> Self:
-    """Connects an RFCOMM channel with Service Record UUID.
+      channel_or_uuid: int | str,
+  ) -> Coroutine[None, None, Self]:
+    """Connects an RFCOMM channel asynchronously.
 
     Args:
-      snippet: Snippet client instance.
-      address: Address of target device.
-      secure: Whether encryption is required.
-      uuid: Service record UUID.
-      retry_count: Allowed retry count of connect attempts.
+      snippet: snippet client instance.
+      address: address of target device.
+      secure: whether encryption is required.
+      channel_or_uuid: channel number or UUID of the RFCOMM channel.
 
     Returns:
-      RFCOMM client wrapper instance.
-
-    Raises:
-      ConnectionError: RFCOMM is not connected after allowed retry counts.
+      A coroutine that will return the RFCOMM client wrapper instance.
     """
+    if isinstance(channel_or_uuid, int):
+      method = 'rfcommConnectWithChannel'
+    else:
+      method = 'rfcommConnectWithUuid'
 
-    @retry.retry_on_exception(
-        initial_delay_sec=_DEFAULT_RETRY_DELAY_SECONDS,
-        num_retries=retry_count,
+    coro = _schedule_rpc(
+        snippet,
+        method,
+        (address, secure, channel_or_uuid),
     )
-    async def inner():
-      with contextlib.suppress(mobly.snippet.errors.ApiError):
-        cookie = await asyncio.to_thread(
-            snippet.rfcommConnectWithUuid,
-            address,
-            secure,
-            uuid,
-        )
-        return cls(snippet=snippet, cookie=cookie)
-      raise errors.ConnectionError('Unable to connect RFCOMM')
 
-    return await inner()
+    async def inner() -> Self:
+      cookie = await coro
+      return cls(snippet=snippet, cookie=cookie)
+
+    return inner()
 
   async def close(self) -> None:
     """Closes the RFCOMM channel."""
@@ -2563,14 +2608,29 @@ class SnippetWrapper:
     Returns:
       The RFCOMM channel control block.
     """
-    if isinstance(channel_or_uuid, int):
-      return await RfcommChannel.connect_with_channel_number(
-          self.snippet, address, secure, channel_or_uuid, retry_count
-      )
-    else:
-      return await RfcommChannel.connect_with_service_record(
-          self.snippet, address, secure, channel_or_uuid, retry_count
-      )
+    return await RfcommChannel.connect(
+        self.snippet, address, secure, channel_or_uuid, retry_count
+    )
+
+  def create_rfcomm_channel_async(
+      self,
+      address: str,
+      secure: bool,
+      channel_or_uuid: int | str,
+  ) -> Coroutine[None, None, RfcommChannel]:
+    """Creates an RFCOMM channel.
+
+    Args:
+      address: Address of target device.
+      secure: Whether encryption is required.
+      channel_or_uuid: Channel number or UUID of the RFCOMM service.
+
+    Returns:
+      The RFCOMM channel control block.
+    """
+    return RfcommChannel.connect_async(
+        self.snippet, address, secure, channel_or_uuid
+    )
 
   async def start_legacy_advertiser(
       self,
