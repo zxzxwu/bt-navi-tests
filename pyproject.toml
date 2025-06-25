@@ -26,7 +26,9 @@ dependencies = [
 dev = ["mypy == 1.15.0"]
 
 [project.scripts]
-generic_functionality_suite = "navi.tests.generic_functionality_suite:main"
+functionality = "navi.tests.main:run_unctionality"
+smoke = "navi.tests.main:run_smoke"
+run_all = "navi.tests.main:run_all"
 
 [tool.setuptools]
 packages = ["navi"]

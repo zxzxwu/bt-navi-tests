@@ -17,26 +17,39 @@
 import inspect
 import pkgutil
 import importlib
+import types
 from mobly import base_test
 from mobly import suite_runner
 
 from navi.tests import smoke
 from navi.tests import functionality
 
-def main() -> None:
-    test_classes: list[base_test.BaseTestClass] = []
-    for module in (smoke, functionality):
-        for submodule_info in pkgutil.iter_modules(
-            module.__path__, prefix=module.__name__ + "."
-        ):
-            submodule = importlib.import_module(submodule_info.name)
-            for _, test_class in inspect.getmembers(
-                submodule,
-                lambda x: inspect.isclass(x)
-                and issubclass(x, base_test.BaseTestClass),
-            ):
-                test_classes.append(test_class)
-    suite_runner.run_suite(test_classes)
 
-if __name__ == "__main__":
-    main()
+def get_all_test_classes(
+    module: types.ModuleType,
+) -> list[type[base_test.BaseTestClass]]:
+    test_classes: list[base_test.BaseTestClass] = []
+    for submodule_info in pkgutil.iter_modules(
+        module.__path__, prefix=module.__name__ + "."
+    ):
+        submodule = importlib.import_module(submodule_info.name)
+        for _, test_class in inspect.getmembers(
+            submodule,
+            lambda x: inspect.isclass(x) and issubclass(x, base_test.BaseTestClass),
+        ):
+            test_classes.append(test_class)
+    return test_classes
+
+
+def run_smoke() -> None:
+    suite_runner.run_suite(get_all_test_classes(smoke))
+
+
+def run_functionality() -> None:
+    suite_runner.run_suite(get_all_test_classes(functionality))
+
+
+def run_all() -> None:
+    suite_runner.run_suite(
+        get_all_test_classes(smoke) + get_all_test_classes(functionality)
+    )
