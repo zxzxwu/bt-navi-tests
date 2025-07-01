@@ -48,6 +48,7 @@ _AVRCP_TARGET_RECORD_HANDLE = 3
 _DEFAULT_STEP_TIMEOUT_SECONDS = 5.0
 _AVRCP_MAX_VOLUME = 127
 _PROPERTY_CODEC_PRIORITY = "bluetooth.a2dp.source.%s_priority.config"
+_PROPERTY_OPUS_ENABLED = "persist.bluetooth.opus.enabled"
 _VALUE_CODEC_DISABLED = -1
 _PREPARE_TIME_SECONDS = 0.5
 
@@ -105,6 +106,9 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
         != "true"
     ):
       raise signals.TestAbortClass("A2DP is not enabled on DUT.")
+    if self.dut.device.build_info["hardware"] == "cutf_cvm":
+      # Force enable OPUS on Cuttlefish.
+      self.dut.setprop(_PROPERTY_OPUS_ENABLED, "true")
     self.dut_supported_codecs = [
         codec
         for codec in _A2dpCodec
@@ -113,6 +117,10 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
             or "0"
         )
         > _VALUE_CODEC_DISABLED
+        and (
+            codec != _A2dpCodec.OPUS
+            or self.dut.getprop(_PROPERTY_OPUS_ENABLED) == "true"
+        )
     ]
 
   @override
@@ -379,6 +387,7 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
       (_Issuer.DUT, [_A2dpCodec.SBC, _A2dpCodec.AAC, _A2dpCodec.APTX]),
       (_Issuer.DUT, [_A2dpCodec.SBC, _A2dpCodec.AAC, _A2dpCodec.APTX_HD]),
       (_Issuer.DUT, [_A2dpCodec.SBC, _A2dpCodec.AAC, _A2dpCodec.LDAC]),
+      (_Issuer.DUT, [_A2dpCodec.SBC, _A2dpCodec.AAC, _A2dpCodec.OPUS]),
       (_Issuer.REF, [_A2dpCodec.SBC]),
       (_Issuer.REF, [_A2dpCodec.SBC, _A2dpCodec.AAC]),
   )
@@ -514,7 +523,7 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
         )
       if self.user_params.get(navi_test_base.RECORD_FULL_DATA) and buffer:
         self.write_test_output_data(
-            f"a2dp_data.{preferred_codec.name.lower()}",
+            f"a2dp_data.{preferred_codec.format}",
             buffer,
         )
 
@@ -524,7 +533,7 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
           and audio.SUPPORT_AUDIO_PROCESSING
       ):
         dominant_frequency = audio.get_dominant_frequency(
-            buffer, format=preferred_codec.name
+            buffer, format=preferred_codec.format
         )
         self.logger.info("Dominant frequency: %.2f", dominant_frequency)
         # Dominant frequency is not accurate on emulator.

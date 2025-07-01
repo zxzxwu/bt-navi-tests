@@ -26,11 +26,12 @@ import pathlib
 import re
 import secrets
 import sys
-from typing import Any, cast, ClassVar, final, Never, TypeAlias
+from typing import Any, ClassVar, Never, TypeAlias, cast, final
 
 from absl.testing import absltest
 from bumble import pairing
 import bumble.core
+import bumble.device
 import bumble.hci
 from mobly import base_test
 from mobly import records

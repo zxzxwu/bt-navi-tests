@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 
 from bumble import a2dp
 from bumble import avdtp
@@ -33,6 +34,7 @@ _A2DP_SERVICE_RECORD_HANDLE = 1
 _AVRCP_TARGET_RECORD_HANDLE = 2
 
 _DEFAULT_STEP_TIMEOUT_SECONDS = 5.0
+_DEFAULT_STREAM_DURATION_SECONDS = 1.0
 
 _Property = android_constants.Property
 
@@ -54,9 +56,11 @@ class A2dpSinkTest(navi_test_base.TwoDevicesTestBase):
     if self.dut.getprop(_Property.AVRCP_CONTROLLER_ENABLED) != "true":
       raise signals.TestAbortClass("AVRCP Controller is not enabled on DUT.")
 
-  def _setup_a2dp_source_device(self, bumble_device: device.Device):
+  @override
+  async def async_setup_test(self) -> None:
+    await super().async_setup_test()
     # Setup SDP service records.
-    bumble_device.sdp_service_records = {
+    self.ref.device.sdp_service_records = {
         _A2DP_SERVICE_RECORD_HANDLE: a2dp.make_audio_source_service_sdp_records(
             _A2DP_SERVICE_RECORD_HANDLE
         ),
@@ -64,12 +68,28 @@ class A2dpSinkTest(navi_test_base.TwoDevicesTestBase):
             _AVRCP_TARGET_RECORD_HANDLE
         ),
     }
+
+  def _setup_a2dp_source_device(
+      self,
+      bumble_device: device.Device,
+      codecs: Sequence[a2dp_ext.A2dpCodec] = (
+          a2dp_ext.A2dpCodec.SBC,
+          a2dp_ext.A2dpCodec.AAC,
+      ),
+  ):
     # Setup AVDTP server.
     avdtp_protocol_queue = asyncio.Queue[avdtp.Protocol]()
     avdtp_listener = avdtp.Listener.for_device(device=bumble_device)
-    avdtp_listener.on(
-        avdtp_listener.EVENT_CONNECTION, avdtp_protocol_queue.put_nowait
-    )
+
+    def on_avdtp_connection(protocol: avdtp.Protocol) -> None:
+      for codec in codecs:
+        protocol.add_source(
+            codec.get_default_capabilities(),
+            codec.get_media_packet_pump(protocol.l2cap_channel.peer_mtu),
+        )
+      avdtp_protocol_queue.put_nowait(protocol)
+
+    avdtp_listener.on(avdtp_listener.EVENT_CONNECTION, on_avdtp_connection)
     # Setup AVRCP server.
     avrcp_delegate = avrcp.Delegate()
     avrcp_protocol_starts = asyncio.Queue[None]()
@@ -85,8 +105,8 @@ class A2dpSinkTest(navi_test_base.TwoDevicesTestBase):
     """Tests A2DP connection establishment right after a pairing session.
 
     Test steps:
-    1. Connect and pair REF.
-    2. Make A2DP and AVRCP connection from REF.
+      1. Connect and pair REF.
+      2. Make A2DP and AVRCP connection from DUT.
     """
     ref_avdtp_protocol_queue, ref_avrcp_protocol, ref_avrcp_protocol_queue = (
         self._setup_a2dp_source_device(self.ref.device)
@@ -108,18 +128,6 @@ class A2dpSinkTest(navi_test_base.TwoDevicesTestBase):
     async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
       self.logger.info("[REF] Wait for AVDTP connection")
       avdtp_protocol = await ref_avdtp_protocol_queue.get()
-
-      # Fake a SBC packet source.
-      async def read(size: int) -> bytes:
-        return bytes(size)
-
-      packet_source = a2dp.SbcPacketSource(
-          read, avdtp_protocol.l2cap_channel.peer_mtu
-      )
-      packet_pump = avdtp.MediaPacketPump(packet_source.packets)
-      avdtp_protocol.add_source(
-          a2dp_ext.A2dpCodec.SBC.get_default_capabilities(), packet_pump
-      )
       self.logger.info("[REF] Discover remote endpoints")
       await avdtp_protocol.discover_remote_endpoints()
 
@@ -142,6 +150,51 @@ class A2dpSinkTest(navi_test_base.TwoDevicesTestBase):
             state=android_constants.ConnectionState.CONNECTED,
         )
     )
+
+  async def test_streaming_sbc(self) -> None:
+    """Tests streaming SBC.
+
+    Test steps:
+      1. Connect and pair REF.
+      2. Make A2DP and AVRCP connection from DUT.
+      3. Start streaming SBC.
+      4. Stop streaming SBC.
+    """
+    ref_avdtp_protocol_queue, ref_avrcp_protocol, ref_avrcp_protocol_queue = (
+        self._setup_a2dp_source_device(
+            self.ref.device, codecs=[a2dp_ext.A2dpCodec.SBC]
+        )
+    )
+    del ref_avrcp_protocol, ref_avrcp_protocol_queue
+
+    self.logger.info("[DUT] Connect and pair REF.")
+    await self.classic_connect_and_pair()
+
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      self.logger.info("[REF] Wait for AVDTP connection")
+      avdtp_protocol = await ref_avdtp_protocol_queue.get()
+      self.logger.info("[REF] Discover remote endpoints")
+      await avdtp_protocol.discover_remote_endpoints()
+
+    source = a2dp_ext.find_local_source_by_codec(
+        avdtp_protocol, a2dp.A2DP_SBC_CODEC_TYPE
+    )
+    if source is None:
+      self.fail("No A2DP local SBC source found")
+
+    if not (stream := source.stream):
+      # If there is only one source, DUT will automatically create a stream.
+      self.fail("No A2DP SBC stream found")
+
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      self.logger.info("[REF] Start stream")
+      await stream.start()
+
+    await asyncio.sleep(_DEFAULT_STREAM_DURATION_SECONDS)
+
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      self.logger.info("[REF] Stop stream")
+      await stream.stop()
 
 
 if __name__ == "__main__":

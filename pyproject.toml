@@ -38,3 +38,4 @@ packages = ["navi"]
 
 [tool.mypy]
 follow_untyped_imports = true
+disable_error_code = ["method-assign"]

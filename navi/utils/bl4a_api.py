@@ -1375,8 +1375,6 @@ class LegacyAdvertiser:
             _make_json_object(scan_response),
         ),
     )
-    if not cookie:
-      raise RuntimeError('Failed to start advertising.')
     return cls(cookie=cookie, snippet=snippet)
 
   def stop(self) -> None:

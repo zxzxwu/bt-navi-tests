@@ -47,18 +47,17 @@ import com.google.android.mobly.snippet.rpc.RpcOptional
 import com.google.wireless.android.pixel.bluetooth.snippet.Utils.postSnippetEvent
 import java.util.UUID
 import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
-import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.timeout
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 
 // Permissions are requested with UiAutomation.
 @SuppressLint("MissingPermission")
@@ -371,39 +370,29 @@ class BluetoothAdapterSnippet : Snippet {
     advertiseSettings: AdvertiseSettings,
     @RpcOptional advertiseData: AdvertiseData?,
     @RpcOptional scanResponse: AdvertiseData?,
-  ): String? {
+  ): String = runBlocking {
     val advertiser = bluetoothAdapter.bluetoothLeAdvertiser
-    var cookie: String? = null
+    val deferred = CompletableDeferred<Unit>()
+    val advertiseCallback =
+      object : AdvertiseCallback() {
+        override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
+          deferred.complete(Unit)
+        }
 
-    val flow =
-      callbackFlow<AdvertiseCallback?> {
-        val advertiseCallback =
-          object : AdvertiseCallback() {
-            override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
-              super.onStartSuccess(settingsInEffect)
-              val unused = trySendBlocking(this)
-            }
-
-            override fun onStartFailure(errorCode: Int) {
-              super.onStartFailure(errorCode)
-              val unused = trySendBlocking(null)
-            }
-          }
-
-        advertiser.startAdvertising(
-          advertiseSettings,
-          advertiseData,
-          scanResponse,
-          advertiseCallback,
-        )
-        awaitClose()
+        override fun onStartFailure(errorCode: Int) {
+          deferred.completeExceptionally(
+            RuntimeException("Advertising failed with error code $errorCode")
+          )
+        }
       }
-    runBlocking {
-      flow.timeout(ADVERTISING_START_TIMEOUT).first()?.let { callback ->
-        cookie = UUID.randomUUID().toString().also { advertisers[it] = callback }
-      }
-    }
-    return cookie
+
+    advertiser.startAdvertising(advertiseSettings, advertiseData, scanResponse, advertiseCallback)
+
+    withTimeoutOrNull(ADVERTISING_START_TIMEOUT) { deferred.await() }
+      ?: throw RuntimeException("Advertising didn't start after ${ADVERTISING_START_TIMEOUT}")
+    val cookie = UUID.randomUUID().toString()
+    advertisers[cookie] = advertiseCallback
+    cookie
   }
 
   /**
@@ -418,39 +407,39 @@ class BluetoothAdapterSnippet : Snippet {
     @RpcOptional scanResponse: AdvertiseData?,
     @RpcOptional periodicAdvertisingParameters: PeriodicAdvertisingParameters?,
     @RpcOptional periodicAdvertisingData: AdvertiseData?,
-  ): String {
-    val flow =
-      callbackFlow<Pair<Int, AdvertisingSetCallback>> {
-        val advertisingSetCallback =
-          object : AdvertisingSetCallback() {
-            override fun onAdvertisingSetStarted(
-              advertisingSet: AdvertisingSet,
-              txPower: Int,
-              status: Int,
-            ) {
-              val unused = trySendBlocking(Pair(status, this))
-            }
+  ): String = runBlocking {
+    val deferred = CompletableDeferred<Unit>()
+    val advertisingSetCallback =
+      object : AdvertisingSetCallback() {
+        override fun onAdvertisingSetStarted(
+          advertisingSet: AdvertisingSet,
+          txPower: Int,
+          status: Int,
+        ) {
+          if (status == AdvertisingSetCallback.ADVERTISE_SUCCESS) {
+            deferred.complete(Unit)
+          } else {
+            deferred.completeExceptionally(
+              RuntimeException("Unable to start advertising, status=$status")
+            )
           }
+        }
+      }
 
-        bluetoothAdapter.bluetoothLeAdvertiser.startAdvertisingSet(
-          advertiseSetParameters,
-          advertiseData,
-          scanResponse,
-          periodicAdvertisingParameters,
-          periodicAdvertisingData,
-          advertisingSetCallback,
-        )
-        awaitClose()
-      }
-    return runBlocking {
-      val (status, callback) = flow.timeout(ADVERTISING_START_TIMEOUT).first()
-      if (status != AdvertisingSetCallback.ADVERTISE_SUCCESS) {
-        throw RuntimeException("Unable to start advertising, status=$status")
-      }
-      val cookie = UUID.randomUUID().toString()
-      advertisingSets[cookie] = callback
-      cookie
-    }
+    bluetoothAdapter.bluetoothLeAdvertiser.startAdvertisingSet(
+      advertiseSetParameters,
+      advertiseData,
+      scanResponse,
+      periodicAdvertisingParameters,
+      periodicAdvertisingData,
+      advertisingSetCallback,
+    )
+
+    withTimeoutOrNull(ADVERTISING_START_TIMEOUT) { deferred.await() }
+      ?: throw RuntimeException("Advertising didn't start after ${ADVERTISING_START_TIMEOUT}")
+    val cookie = UUID.randomUUID().toString()
+    advertisingSets[cookie] = advertisingSetCallback
+    cookie
   }
 
   /** Stops BLE advertiser with [cookie]. */
