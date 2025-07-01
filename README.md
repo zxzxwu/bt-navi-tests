@@ -144,16 +144,15 @@ device is `localhost:40155` and `localhost:46879`.
 This test suite has been integrated with [Mobly Android Partner Tools](https://github.com/android/mobly-android-partner-tools/tree/main), so it can be run with
 
 ```bash
-mobly_runner generic_functionality_suite -c config.yml -tb default -i [-u]
+# Smoke
+mobly_runner smoke -c config.yml -tb default -i [-u]
+# Venti (More functionality tests)
+mobly_runner venti -c config.yml -tb default -i [-u]
+# All (Smoke + Venti)
+mobly_runner run_all -c config.yml -tb default -i [-u]
 ```
 
 NOTE: If -c and -tb is not specified, Mobly mobly_runner will automatically select all devices with the order present in `adb devices`. Check `mobly_runner -h` for more details.
-
-Or you may run the following commands from the local directory, but you need to manually install `bluetooth_snippet.apk` before running the test:
-
-```bash
-python3 navi/tests/generic_functionality_suite.py -c config.yml -tb default
-```
 
 ### Upload test results
 
