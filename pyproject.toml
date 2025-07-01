@@ -26,7 +26,7 @@ dependencies = [
 dev = ["mypy == 1.15.0"]
 
 [project.scripts]
-functionality = "navi.tests.main:run_unctionality"
+venti = "navi.tests.main:run_venti"
 smoke = "navi.tests.main:run_smoke"
 run_all = "navi.tests.main:run_all"
 
