@@ -26,17 +26,16 @@ dependencies = [
 dev = ["mypy == 1.15.0"]
 
 [project.scripts]
-generic_functionality_suite = "navi.tests.generic_functionality_suite:main"
+functionality = "navi.tests.main:run_unctionality"
+smoke = "navi.tests.main:run_smoke"
+run_all = "navi.tests.main:run_all"
 
 [tool.setuptools]
-py-modules = ["_build"]
 packages = ["navi"]
-
-[tool.setuptools.cmdclass]
-build_py = "_build.build_py"
 
 [tool.setuptools.package-data]
 "*" = ["*.pyi", "py.typed", "*.json", "*.mp3", "android_hci_proxy_*", "*.apk"]
 
 [tool.mypy]
 follow_untyped_imports = true
+disable_error_code = ["method-assign"]

@@ -95,6 +95,7 @@ class AshaDualDevicesTest(navi_test_base.MultiDevicesTestBase):
         await self.le_connect_and_pair(
             ref_address_type=hci.OwnAddressType.RANDOM,
             ref=ref,
+            connect_profiles=True,
         )
         self.logger.info(
             '[DUT] Wait for ASHA connected to %s', ref.random_address
