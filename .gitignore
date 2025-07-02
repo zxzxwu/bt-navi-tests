@@ -172,7 +172,3 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
-
-# Generated file
-navi/utils/snippet_constants.py
-snippet/SnippetConstants.kt
