@@ -295,7 +295,18 @@ class DistanceMeasurementTest(navi_test_base.TwoDevicesTestBase):
       raise signals.TestAbortClass(
           'DUT does not support any distance measurement method.'
       )
-    self.ref.config.channel_sounding_enabled = True
+
+    # If DUT supports Channel Sounding, check if the REF device supports it.
+    if (
+        android_constants.DistanceMeasurementMethodId.CHANNEL_SOUNDING
+        in self.dut_supported_methods
+    ):
+      async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECEONDS):
+        self.ref.config.channel_sounding_enabled = (
+            self.ref.device.host.supports_le_features(
+                hci.LeFeatureMask.CHANNEL_SOUNDING
+            )
+        )
 
   async def async_setup_test(self) -> None:
     await super().async_setup_test()
@@ -360,6 +371,8 @@ class DistanceMeasurementTest(navi_test_base.TwoDevicesTestBase):
         not in self.dut_supported_methods
     ):
       self.skipTest('Channel Sounding is not supported, skip the test.')
+    if not self.ref.config.channel_sounding_enabled:
+      self.skipTest('Channel Sounding is not enabled on the REF device.')
 
     ras = _RangingService(ras_features=rap.RasFeatures.REAL_TIME_RANGING_DATA)
     self.ref.device.gatt_server.add_service(ras)
@@ -456,6 +469,8 @@ class DistanceMeasurementTest(navi_test_base.TwoDevicesTestBase):
         or not (ref_cs_capabilities := self.ref.device.cs_capabilities)
     ):
       self.skipTest('Channel Sounding is not supported, skip the test.')
+    if not self.ref.config.channel_sounding_enabled:
+      self.skipTest('Channel Sounding is not enabled on the REF device.')
 
     # Pairing from REF.
     await self.le_connect_and_pair(

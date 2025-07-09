@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import abc
 import asyncio
 import base64
 from collections.abc import Callable, Coroutine, Mapping, Sequence
@@ -49,6 +48,8 @@ _logger = logging.getLogger(__name__)
 _DEFAULT_RETRY_COUNT = 3
 _DEFAULT_RETRY_DELAY_SECONDS = 1.0
 _DEFAULT_CALLBACK_TIMEOUT_SECONDS = 30.0
+_FIELD = 'field'
+_MAPPER = 'mapper'
 
 
 def _make_json_object(arg: Any) -> Any:
@@ -315,13 +316,13 @@ class CallbackHandler:
       self.close()
 
 
-class JsonDeserializableEvent(abc.ABC):
+@dataclasses.dataclass
+class JsonDeserializableEvent:
   """Base class for JSON deserializable objects."""
 
   EVENT_NAME: ClassVar[str]
 
   @classmethod
-  @abc.abstractmethod
   def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
     """Creates an instance deserialized from a JSON-style mapping.
 
@@ -331,7 +332,13 @@ class JsonDeserializableEvent(abc.ABC):
     Returns:
       The converted instance.
     """
-    raise NotImplementedError
+    kwargs: dict[str, Any] = {}
+    for field in dataclasses.fields(cls):
+      json_field = field.metadata.get(_FIELD, field.name)
+      value = mapping[json_field]
+      mapper = field.metadata.get(_MAPPER, lambda x: x)
+      kwargs[field.name] = mapper(value) if value is not None else None
+    return cls(**kwargs)
 
 
 @dataclasses.dataclass
@@ -450,42 +457,37 @@ class GattService:
 
 @dataclasses.dataclass
 class KeyEvent(JsonDeserializableEvent):
-  key_code: int
-  action: int
+  key_code: int = dataclasses.field(
+      metadata={_FIELD: snippet_constants.KEY_EVENT_FIELD_KEY_CODE}
+  )
+  action: int = dataclasses.field(
+      metadata={_FIELD: snippet_constants.KEY_EVENT_FIELD_ACTION}
+  )
 
   EVENT_NAME = snippet_constants.KEY_EVENT
-
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        key_code=mapping[snippet_constants.KEY_EVENT_FIELD_KEY_CODE],
-        action=mapping[snippet_constants.KEY_EVENT_FIELD_ACTION],
-    )
 
 
 @dataclasses.dataclass
 class MotionEvent(JsonDeserializableEvent):
-  action: android_constants.MotionAction
-  button_state: android_constants.Button
-  x: float
-  y: float
+  """Dataclass for MotionEvent metadata."""
+
+  action: android_constants.MotionAction = dataclasses.field(
+      metadata={
+          _FIELD: snippet_constants.KEY_EVENT_FIELD_ACTION,
+          _MAPPER: android_constants.MotionAction,
+      }
+  )
+  button_state: int = dataclasses.field(
+      metadata={_FIELD: snippet_constants.MOTION_EVENT_FIELD_BUTTON_STATE}
+  )
+  x: float = dataclasses.field(
+      metadata={_FIELD: snippet_constants.MOTION_EVENT_FIELD_X}
+  )
+  y: float = dataclasses.field(
+      metadata={_FIELD: snippet_constants.MOTION_EVENT_FIELD_Y}
+  )
 
   EVENT_NAME = snippet_constants.MOTION_EVENT
-
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        action=android_constants.MotionAction(
-            mapping[snippet_constants.KEY_EVENT_FIELD_ACTION]
-        ),
-        button_state=android_constants.Button(
-            mapping[snippet_constants.MOTION_EVENT_FIELD_BUTTON_STATE]
-        ),
-        x=mapping[snippet_constants.MOTION_EVENT_FIELD_X],
-        y=mapping[snippet_constants.MOTION_EVENT_FIELD_Y],
-    )
 
 
 @dataclasses.dataclass
@@ -497,20 +499,17 @@ class AclConnected(JsonDeserializableEvent):
     transport: transport of the connected connection.
   """
 
-  address: str
-  transport: android_constants.Transport
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  transport: android_constants.Transport = dataclasses.field(
+      metadata={
+          _FIELD: snippet_constants.FIELD_TRANSPORT,
+          _MAPPER: android_constants.Transport,
+      }
+  )
 
   EVENT_NAME = snippet_constants.ACL_CONNECTED
-
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        address=mapping[snippet_constants.FIELD_DEVICE],
-        transport=android_constants.Transport(
-            mapping[snippet_constants.FIELD_TRANSPORT]
-        ),
-    )
 
 
 @dataclasses.dataclass
@@ -522,20 +521,17 @@ class AclDisconnected(JsonDeserializableEvent):
     transport: transport of the disconnected connection.
   """
 
-  address: str
-  transport: android_constants.Transport
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  transport: android_constants.Transport = dataclasses.field(
+      metadata={
+          _FIELD: snippet_constants.FIELD_TRANSPORT,
+          _MAPPER: android_constants.Transport,
+      }
+  )
 
   EVENT_NAME = snippet_constants.ACL_DISCONNECTED
-
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        address=mapping[snippet_constants.FIELD_DEVICE],
-        transport=android_constants.Transport(
-            mapping[snippet_constants.FIELD_TRANSPORT]
-        ),
-    )
 
 
 @dataclasses.dataclass
@@ -547,54 +543,44 @@ class BondStateChanged(JsonDeserializableEvent):
     state: new bond state of remote device.
   """
 
-  address: str
-  state: android_constants.BondState
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  state: android_constants.BondState = dataclasses.field(
+      metadata={
+          _FIELD: snippet_constants.FIELD_STATE,
+          _MAPPER: android_constants.BondState,
+      }
+  )
 
   EVENT_NAME = snippet_constants.BOND_STATE_CHANGE
-
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        address=mapping[snippet_constants.FIELD_DEVICE],
-        state=android_constants.BondState(
-            mapping[snippet_constants.FIELD_STATE]
-        ),
-    )
 
 
 @dataclasses.dataclass
 class UuidChanged(JsonDeserializableEvent):
-  address: str
-  uuids: list[str] | None
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  uuids: list[str] | None = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_UUID}
+  )
 
   EVENT_NAME = snippet_constants.UUID_CHANGED
-
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        address=mapping[snippet_constants.FIELD_DEVICE],
-        uuids=mapping.get(snippet_constants.FIELD_UUID),
-    )
 
 
 @dataclasses.dataclass
 class A2dpPlayingStateChanged(JsonDeserializableEvent):
   EVENT_NAME = snippet_constants.A2DP_PLAYING_STATE_CHANGED
 
-  address: str
-  state: android_constants.A2dpState
-
-  @classmethod
-  @override
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        address=mapping[snippet_constants.FIELD_DEVICE],
-        state=android_constants.A2dpState(
-            mapping[snippet_constants.FIELD_STATE]
-        ),
-    )
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  state: android_constants.A2dpState = dataclasses.field(
+      metadata={
+          _FIELD: snippet_constants.FIELD_STATE,
+          _MAPPER: android_constants.A2dpState,
+      }
+  )
 
 
 @dataclasses.dataclass
@@ -607,22 +593,18 @@ class PairingRequest(JsonDeserializableEvent):
     pin: pairing confirmation pin code.
   """
 
-  address: str
-  variant: android_constants.PairingVariant
-  pin: int
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  variant: android_constants.PairingVariant = dataclasses.field(
+      metadata={
+          _FIELD: snippet_constants.FIELD_VARIANT,
+          _MAPPER: android_constants.PairingVariant,
+      }
+  )
+  pin: int = dataclasses.field(metadata={_FIELD: snippet_constants.FIELD_PIN})
 
   EVENT_NAME = snippet_constants.PAIRING_REQUEST
-
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        address=mapping[snippet_constants.FIELD_DEVICE],
-        variant=android_constants.PairingVariant(
-            mapping[snippet_constants.FIELD_VARIANT]
-        ),
-        pin=mapping[snippet_constants.FIELD_PIN],
-    )
 
 
 @dataclasses.dataclass
@@ -634,18 +616,12 @@ class DeviceFound(JsonDeserializableEvent):
     name: name of remote device.
   """
 
-  address: str
-  name: str
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  name: str = dataclasses.field(metadata={_FIELD: snippet_constants.FIELD_NAME})
 
   EVENT_NAME = snippet_constants.DEVICE_FOUND
-
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        address=mapping[snippet_constants.FIELD_DEVICE],
-        name=mapping[snippet_constants.FIELD_NAME],
-    )
 
 
 @dataclasses.dataclass
@@ -657,37 +633,32 @@ class AudioDeviceAdded(JsonDeserializableEvent):
     device_type: type of audio device.
   """
 
-  address: str
-  device_type: android_constants.AudioDeviceType
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  device_type: android_constants.AudioDeviceType = dataclasses.field(
+      metadata={
+          _FIELD: snippet_constants.FIELD_TRANSPORT,
+          _MAPPER: android_constants.AudioDeviceType,
+      }
+  )
 
   EVENT_NAME = snippet_constants.AUDIO_DEVICE_ADDED
-
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        address=mapping[snippet_constants.FIELD_DEVICE],
-        device_type=android_constants.AudioDeviceType(
-            mapping[snippet_constants.FIELD_TRANSPORT]
-        ),
-    )
 
 
 @dataclasses.dataclass
 class CommunicationDeviceChanged(JsonDeserializableEvent):
-  address: str
-  device_type: android_constants.AudioDeviceType
-  EVENT_NAME = snippet_constants.AUDIO_COMMUNICATION_DEVICE_CHANGED
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  device_type: android_constants.AudioDeviceType = dataclasses.field(
+      metadata={
+          _FIELD: snippet_constants.FIELD_TRANSPORT,
+          _MAPPER: android_constants.AudioDeviceType,
+      }
+  )
 
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        address=mapping[snippet_constants.FIELD_DEVICE],
-        device_type=android_constants.AudioDeviceType(
-            mapping[snippet_constants.FIELD_TRANSPORT]
-        ),
-    )
+  EVENT_NAME = snippet_constants.AUDIO_COMMUNICATION_DEVICE_CHANGED
 
 
 @dataclasses.dataclass
@@ -699,22 +670,20 @@ class GattConnectionStateChanged(JsonDeserializableEvent):
     status: status or reason of state transition.
   """
 
-  state: android_constants.ConnectionState
-  status: android_constants.GattStatus
+  state: android_constants.ConnectionState = dataclasses.field(
+      metadata={
+          _FIELD: snippet_constants.FIELD_STATE,
+          _MAPPER: android_constants.ConnectionState,
+      }
+  )
+  status: android_constants.GattStatus = dataclasses.field(
+      metadata={
+          _FIELD: snippet_constants.FIELD_STATUS,
+          _MAPPER: android_constants.GattStatus,
+      }
+  )
 
   EVENT_NAME = snippet_constants.GATT_CONNECTION_STATE_CHANGE
-
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        state=android_constants.ConnectionState(
-            mapping[snippet_constants.FIELD_STATE]
-        ),
-        status=android_constants.GattStatus(
-            mapping[snippet_constants.FIELD_STATUS]
-        ),
-    )
 
 
 @dataclasses.dataclass
@@ -728,22 +697,20 @@ class GattCharacteristicReadRequest(JsonDeserializableEvent):
     offset: offset of value in the request.
   """
 
-  address: str
-  characteristic_uuid: str
-  request_id: int
-  offset: int
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  characteristic_uuid: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_UUID}
+  )
+  request_id: int = dataclasses.field(
+      metadata={_FIELD: snippet_constants.GATT_FIELD_REQUEST_ID}
+  )
+  offset: int = dataclasses.field(
+      metadata={_FIELD: snippet_constants.GATT_FIELD_OFFSET}
+  )
 
   EVENT_NAME = snippet_constants.GATT_SERVER_CHARACTERISTIC_READ_REQUEST
-
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        address=mapping[snippet_constants.FIELD_DEVICE],
-        characteristic_uuid=mapping[snippet_constants.FIELD_UUID],
-        request_id=mapping[snippet_constants.GATT_FIELD_REQUEST_ID],
-        offset=mapping[snippet_constants.GATT_FIELD_OFFSET],
-    )
 
 
 @dataclasses.dataclass
@@ -760,28 +727,29 @@ class GattCharacteristicWriteRequest(JsonDeserializableEvent):
     prepared_write: whether this is a prepared write.
   """
 
-  address: str
-  characteristic_uuid: str
-  request_id: int
-  offset: int
-  value: bytes
-  response_needed: bool
-  prepared_write: bool
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  characteristic_uuid: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_UUID}
+  )
+  request_id: int = dataclasses.field(
+      metadata={_FIELD: snippet_constants.GATT_FIELD_REQUEST_ID}
+  )
+  offset: int = dataclasses.field(
+      metadata={_FIELD: snippet_constants.GATT_FIELD_OFFSET}
+  )
+  value: bytes = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_VALUE, _MAPPER: bytes}
+  )
+  response_needed: bool = dataclasses.field(
+      metadata={_FIELD: snippet_constants.GATT_FIELD_RESPONSE_NEEDED}
+  )
+  prepared_write: bool = dataclasses.field(
+      metadata={_FIELD: snippet_constants.GATT_FIELD_PREPARED_WRITE}
+  )
 
   EVENT_NAME = snippet_constants.GATT_SERVER_CHARACTERISTIC_WRITE_REQUEST
-
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        address=mapping[snippet_constants.FIELD_DEVICE],
-        characteristic_uuid=mapping[snippet_constants.FIELD_UUID],
-        request_id=mapping[snippet_constants.GATT_FIELD_REQUEST_ID],
-        offset=mapping[snippet_constants.GATT_FIELD_OFFSET],
-        value=bytes(mapping[snippet_constants.FIELD_VALUE]),
-        response_needed=mapping[snippet_constants.GATT_FIELD_RESPONSE_NEEDED],
-        prepared_write=mapping[snippet_constants.GATT_FIELD_PREPARED_WRITE],
-    )
 
 
 @dataclasses.dataclass
@@ -799,47 +767,47 @@ class GattDescriptorWriteRequest(JsonDeserializableEvent):
     prepared_write: whether this is a prepared write.
   """
 
-  address: str
-  characteristic_handle: int
-  descriptor_uuid: str
-  request_id: int
-  offset: int
-  value: bytes
-  response_needed: bool
-  prepared_write: bool
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  characteristic_handle: int = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_HANDLE}
+  )
+  descriptor_uuid: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_UUID}
+  )
+  request_id: int = dataclasses.field(
+      metadata={_FIELD: snippet_constants.GATT_FIELD_REQUEST_ID}
+  )
+  offset: int = dataclasses.field(
+      metadata={_FIELD: snippet_constants.GATT_FIELD_OFFSET}
+  )
+  value: bytes = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_VALUE, _MAPPER: bytes}
+  )
+  response_needed: bool = dataclasses.field(
+      metadata={_FIELD: snippet_constants.GATT_FIELD_RESPONSE_NEEDED}
+  )
+  prepared_write: bool = dataclasses.field(
+      metadata={_FIELD: snippet_constants.GATT_FIELD_PREPARED_WRITE}
+  )
 
   EVENT_NAME = snippet_constants.GATT_SERVER_DESCRIPTOR_WRITE_REQUEST
 
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        address=mapping[snippet_constants.FIELD_DEVICE],
-        characteristic_handle=mapping[snippet_constants.FIELD_HANDLE],
-        descriptor_uuid=mapping[snippet_constants.FIELD_UUID],
-        request_id=mapping[snippet_constants.GATT_FIELD_REQUEST_ID],
-        offset=mapping[snippet_constants.GATT_FIELD_OFFSET],
-        value=bytes(mapping[snippet_constants.FIELD_VALUE]),
-        response_needed=mapping[snippet_constants.GATT_FIELD_RESPONSE_NEEDED],
-        prepared_write=mapping[snippet_constants.GATT_FIELD_PREPARED_WRITE],
-    )
 
-
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class GattCharacteristicChanged(JsonDeserializableEvent):
-  address: str
-  handle: int
-  value: bytes
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  handle: int = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_HANDLE}
+  )
+  value: bytes = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_VALUE, _MAPPER: bytes}
+  )
 
   EVENT_NAME = snippet_constants.GATT_CHARACTERISTIC_CHANGED
-
-  @classmethod
-  def from_mapping(cls: Type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        address=mapping[snippet_constants.FIELD_DEVICE],
-        handle=mapping[snippet_constants.FIELD_HANDLE],
-        value=bytes(mapping[snippet_constants.FIELD_VALUE]),
-    )
 
 
 @dataclasses.dataclass
@@ -851,20 +819,17 @@ class VolumeChanged(JsonDeserializableEvent):
     volume_value: index of volume for stream_type.
   """
 
-  stream_type: android_constants.StreamType
-  volume_value: int
+  stream_type: android_constants.StreamType = dataclasses.field(
+      metadata={
+          _FIELD: snippet_constants.FIELD_TYPE,
+          _MAPPER: android_constants.StreamType,
+      }
+  )
+  volume_value: int = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_VALUE}
+  )
 
   EVENT_NAME = snippet_constants.VOLUME_CHANGED
-
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        stream_type=android_constants.StreamType(
-            mapping[snippet_constants.FIELD_TYPE]
-        ),
-        volume_value=mapping[snippet_constants.FIELD_VALUE],
-    )
 
 
 @dataclasses.dataclass
@@ -877,22 +842,18 @@ class CallStateChanged(JsonDeserializableEvent):
     state: state of the call.
   """
 
-  handle: str
-  name: str
-  state: android_constants.CallState
+  handle: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_HANDLE}
+  )
+  name: str = dataclasses.field(metadata={_FIELD: snippet_constants.FIELD_NAME})
+  state: android_constants.CallState = dataclasses.field(
+      metadata={
+          _FIELD: snippet_constants.FIELD_STATE,
+          _MAPPER: android_constants.CallState,
+      }
+  )
 
   EVENT_NAME = snippet_constants.CALL_STATE_CHANGED
-
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        handle=mapping[snippet_constants.FIELD_HANDLE],
-        name=mapping[snippet_constants.FIELD_NAME],
-        state=android_constants.CallState(
-            mapping[snippet_constants.FIELD_STATE]
-        ),
-    )
 
 
 @dataclasses.dataclass
@@ -904,32 +865,26 @@ class ProfileConnectionStateChanged(JsonDeserializableEvent):
     state: new bond state of remote device.
   """
 
-  address: str
-  state: android_constants.ConnectionState
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  state: android_constants.ConnectionState = dataclasses.field(
+      metadata={
+          _FIELD: snippet_constants.FIELD_STATE,
+          _MAPPER: android_constants.ConnectionState,
+      }
+  )
 
   EVENT_NAME = snippet_constants.PROFILE_CONNECTION_STATE_CHANGE
-
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        address=mapping[snippet_constants.FIELD_DEVICE],
-        state=android_constants.ConnectionState(
-            mapping[snippet_constants.FIELD_STATE]
-        ),
-    )
 
 
 @dataclasses.dataclass
 class ProfileActiveDeviceChanged(JsonDeserializableEvent):
-  address: str | None = None
+  address: str | None = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
 
   EVENT_NAME = snippet_constants.ACTIVE_DEVICE_CHANGED
-
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(address=mapping.get(snippet_constants.FIELD_DEVICE))
 
 
 @dataclasses.dataclass
@@ -943,18 +898,15 @@ class HfpAgAudioStateChanged(JsonDeserializableEvent):
 
   EVENT_NAME = snippet_constants.HFP_AG_AUDIO_STATE_CHANGED
 
-  address: str
-  state: android_constants.ScoState
-
-  @classmethod
-  @override
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        address=mapping[snippet_constants.FIELD_DEVICE],
-        state=android_constants.ScoState(
-            mapping[snippet_constants.FIELD_STATE]
-        ),
-    )
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  state: android_constants.ScoState = dataclasses.field(
+      metadata={
+          _FIELD: snippet_constants.FIELD_STATE,
+          _MAPPER: android_constants.ScoState,
+      }
+  )
 
 
 @dataclasses.dataclass
@@ -966,38 +918,31 @@ class HfpHfAudioStateChanged(JsonDeserializableEvent):
     state: new bond state of remote device.
   """
 
-  address: str
-  state: android_constants.ConnectionState
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  state: android_constants.ConnectionState = dataclasses.field(
+      metadata={
+          _FIELD: snippet_constants.FIELD_STATE,
+          _MAPPER: android_constants.ConnectionState,
+      }
+  )
 
   EVENT_NAME = snippet_constants.HFP_HF_AUDIO_STATE_CHANGED
-
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        address=mapping[snippet_constants.FIELD_DEVICE],
-        state=android_constants.ConnectionState(
-            mapping[snippet_constants.FIELD_STATE]
-        ),
-    )
 
 
 @dataclasses.dataclass
 class BatteryLevelChanged(JsonDeserializableEvent):
   """Dataclass for Battery Level Changed event metadata."""
 
-  address: str
-  level: int
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  level: int = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_VALUE}
+  )
 
   EVENT_NAME = snippet_constants.BATTERY_LEVEL_CHANGED
-
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        address=mapping[snippet_constants.FIELD_DEVICE],
-        level=mapping[snippet_constants.FIELD_VALUE],
-    )
 
 
 @dataclasses.dataclass
@@ -1005,16 +950,12 @@ class BroadcastSourceFound(JsonDeserializableEvent):
 
   EVENT_NAME = snippet_constants.BASS_SOURCE_FOUND
 
-  source: auracast_uri.BroadcastAudioUri
-
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        source=auracast_uri.BroadcastAudioUri.from_string(
-            mapping[snippet_constants.FIELD_SOURCE]
-        ),
-    )
+  source: auracast_uri.BroadcastAudioUri = dataclasses.field(
+      metadata={
+          _FIELD: snippet_constants.FIELD_SOURCE,
+          _MAPPER: auracast_uri.BroadcastAudioUri.from_string,
+      }
+  )
 
 
 @dataclasses.dataclass
@@ -1022,12 +963,9 @@ class PlayerIsPlayingChanged(JsonDeserializableEvent):
 
   EVENT_NAME = snippet_constants.PLAYER_IS_PLAYING_CHANGED
 
-  is_playing: bool
-
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(is_playing=mapping[snippet_constants.FIELD_STATE])
+  is_playing: bool = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_STATE}
+  )
 
 
 @dataclasses.dataclass
@@ -1035,56 +973,48 @@ class PlayerMediaItemTransition(JsonDeserializableEvent):
 
   EVENT_NAME = snippet_constants.PLAYER_MEDIA_ITEM_TRANSITION
 
-  uri: str | None
-
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(uri=mapping.get(snippet_constants.URI))
+  uri: str | None = dataclasses.field(metadata={_FIELD: snippet_constants.URI})
 
 
 @dataclasses.dataclass
 class DistanceMeasurementResult(JsonDeserializableEvent):
   """Dataclass for Distance Measurement Result event metadata."""
 
-  result_meters: float | None = None
-  error_meters: float | None = None
-  azimuth_angle: float | None = None
-  error_azimuth_angle: float | None = None
-  altitude_angle: float | None = None
-  error_altitude_angle: float | None = None
-  delay_spread_meters: float | None = None
-  confidence_level: float | None = None
-  velocity_meters_per_second: float | None = None
-  detected_attack_level: int | None = None
-  measurement_timestamp_nanos: int | None = None
+  result_meters: float | None = dataclasses.field(
+      metadata={_FIELD: snippet_constants.RESULT_METERS}
+  )
+  error_meters: float | None = dataclasses.field(
+      metadata={_FIELD: snippet_constants.ERROR_METERS}
+  )
+  azimuth_angle: float | None = dataclasses.field(
+      metadata={_FIELD: snippet_constants.AZIMUTH_ANGLE}
+  )
+  error_azimuth_angle: float | None = dataclasses.field(
+      metadata={_FIELD: snippet_constants.ERROR_AZIMUTH_ANGLE}
+  )
+  altitude_angle: float | None = dataclasses.field(
+      metadata={_FIELD: snippet_constants.ALTITUDE_ANGLE}
+  )
+  error_altitude_angle: float | None = dataclasses.field(
+      metadata={_FIELD: snippet_constants.ERROR_ALTITUDE_ANGLE}
+  )
+  delay_spread_meters: float | None = dataclasses.field(
+      metadata={_FIELD: snippet_constants.DELAY_SPREAD_METERS}
+  )
+  confidence_level: float | None = dataclasses.field(
+      metadata={_FIELD: snippet_constants.CONFIDENCE_LEVEL}
+  )
+  velocity_meters_per_second: float | None = dataclasses.field(
+      metadata={_FIELD: snippet_constants.VELOCITY_METERS_PER_SECOND}
+  )
+  detected_attack_level: int | None = dataclasses.field(
+      metadata={_FIELD: snippet_constants.DETECTED_ATTACK_LEVEL}
+  )
+  measurement_timestamp_nanos: int | None = dataclasses.field(
+      metadata={_FIELD: snippet_constants.MEASUREMENT_TIMESTAMP_NANOS}
+  )
 
   EVENT_NAME = snippet_constants.DISTANCE_MEASUREMENT_RESULT
-
-  @override
-  @classmethod
-  def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
-    return cls(
-        result_meters=mapping.get(snippet_constants.RESULT_METERS),
-        error_meters=mapping.get(snippet_constants.ERROR_METERS),
-        azimuth_angle=mapping.get(snippet_constants.AZIMUTH_ANGLE),
-        error_azimuth_angle=mapping.get(snippet_constants.ERROR_AZIMUTH_ANGLE),
-        altitude_angle=mapping.get(snippet_constants.ALTITUDE_ANGLE),
-        error_altitude_angle=mapping.get(
-            snippet_constants.ERROR_ALTITUDE_ANGLE
-        ),
-        delay_spread_meters=mapping.get(snippet_constants.DELAY_SPREAD_METERS),
-        confidence_level=mapping.get(snippet_constants.CONFIDENCE_LEVEL),
-        velocity_meters_per_second=mapping.get(
-            snippet_constants.VELOCITY_METERS_PER_SECOND
-        ),
-        detected_attack_level=mapping.get(
-            snippet_constants.DETECTED_ATTACK_LEVEL
-        ),
-        measurement_timestamp_nanos=mapping.get(
-            snippet_constants.MEASUREMENT_TIMESTAMP_NANOS
-        ),
-    )
 
 
 @dataclasses.dataclass
