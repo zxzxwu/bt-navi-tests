@@ -1,0 +1,53 @@
+# Build and check the python package
+name: Python build and check
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: ['ubuntu-latest', 'macos-latest', 'windows-latest']
+        python-version: ["3.11", "3.12", "3.13"]
+      fail-fast: false
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install uv and set the python version
+      uses: astral-sh/setup-uv@v6
+      with:
+        version: "0.8.0"
+        python-version: ${{ matrix.python-version }}
+
+    - name: Set up venv
+      run: uv venv
+
+    - name: Install dependencies
+      run: |
+        uv pip install --upgrade pip
+        uv pip install ".[dev,doc]"
+
+    # On Windows, there are a lot of issues related to UTF-8
+    - name: Set environment variables
+      if: runner.os == 'Windows'
+      run: |
+        chcp 65001 #set code page to utf-8
+        echo "PYTHONUTF8=1" >> $env:GITHUB_ENV
+
+    - name: Check
+      run: |
+        uv run mypy navi
+        uv run ruff check
+
+    - name: Get Test List
+      run: |
+        uv run run_all -l
