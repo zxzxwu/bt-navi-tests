@@ -23,6 +23,17 @@ class BluetoothSnippet(snippet_client_v2.SnippetClientV2):
   def createBond(
       self, address: str, transport: int, address_type: int | None = None
   ) -> bool: ...
+  def createBondOutOfBand(
+      self,
+      address: str,
+      transport: int,
+      address_type: int | None = None,
+      p_192_oob_data: dict[str, Any] | None = None,
+      p_256_oob_data: dict[str, Any] | None = None,
+  ) -> bool:
+    """Creates a bond using Out-of-Band method."""
+  def generateLocalOobData(self, transport: int) -> dict[str, Any]:
+    """Generates local Out-of-Band pairing data."""
   def removeBond(self, address: str) -> bool: ...
   def cancelBond(self, address: str) -> bool: ...
   def connect(self, address: str) -> int: ...
