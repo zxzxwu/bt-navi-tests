@@ -57,6 +57,7 @@ def enable_btsnoop(device: android_device.AndroidDevice) -> None:
   device.adb.shell(
       ['settings', 'put', 'global', 'bluetooth_btsnoop_default_mode', 'full']
   )
+  device.adb.shell(['setprop', 'persist.bluetooth.btsnoopdefaultmode', 'full'])
   device.adb.shell(['setprop', 'persist.bluetooth.btsnooplogmode', 'full'])
 
 

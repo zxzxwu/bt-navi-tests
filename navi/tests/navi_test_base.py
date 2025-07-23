@@ -60,6 +60,7 @@ _SETUP_TIMEOUT_SECONDS = 10.0
 # 100 * 0.625ms = 62.5ms
 _DEFAULT_ADVERTISING_INTERVAL = 100
 RECORD_FULL_DATA = "record_full_data"
+DUMP_CROWN_LOG_ON_FAIL = "dump_crown_log_on_fail"
 _DEFAULT_STEP_TIMEOUT_SECONDS = 10.0
 
 
@@ -828,20 +829,19 @@ class AndroidBumbleTestBase(BaseTestBase):
 
   @override
   def on_pass(self, record: records.TestResultRecord) -> None:
-    if self.user_params.get("record_full_data"):
+    if self.user_params.get(RECORD_FULL_DATA):
       self._get_btsnoop_and_dumpsys()
 
   @override
   async def async_teardown_class(self) -> None:
-    if (
-        self.results.failed
-        or self.results.error
-        or self.user_params.get("record_full_data")
-    ):
+    has_error_or_fail = self.results.failed or self.results.error
+    if has_error_or_fail or self.user_params.get(RECORD_FULL_DATA):
       self.dut.device.take_bug_report()
     await super().async_teardown_class()
     for ref in self._refs:
       ref.adapter.stop()
+      if self.user_params.get(DUMP_CROWN_LOG_ON_FAIL) and has_error_or_fail:
+        ref.adapter.dump_debug_logs(self.log_path)
 
   @retry_lib.retry_on_exception(initial_delay_sec=1, num_retries=3)
   async def classic_connect_and_pair(

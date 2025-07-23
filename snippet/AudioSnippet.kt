@@ -346,7 +346,7 @@ class AudioSnippet : Snippet {
             .apply {
               order(ByteOrder.LITTLE_ENDIAN)
               put(WAVE_HEADER_RIFF)
-              putInt(outputBuffer.size + 44) // File size
+              putInt(outputBuffer.size + 36) // File size
               put(WAVE_HEADER_WAVE)
               put(WAVE_HEADER_FMT)
               putInt(16) // Size of previous headers

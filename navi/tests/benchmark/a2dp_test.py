@@ -14,11 +14,8 @@
 
 import statistics
 
-from bumble import a2dp
-from bumble import avdtp
 from bumble import core
 from mobly import test_runner
-from typing_extensions import override
 
 from navi.bumble_ext import a2dp as a2dp_ext
 from navi.tests import navi_test_base
@@ -38,48 +35,15 @@ _A2dpCodec = a2dp_ext.A2dpCodec
 
 
 class A2dpTest(navi_test_base.TwoDevicesTestBase):
-  ref_sinks: dict[_A2dpCodec, avdtp.LocalSink]
-  dut_supported_codecs: list[_A2dpCodec]
-
-  @override
-  async def async_setup_class(self) -> None:
-    await super().async_setup_class()
-    self.dut_supported_codecs = [
-        codec
-        for codec in _A2dpCodec
-        if int(
-            self.dut.getprop(_PROPERTY_CODEC_PRIORITY % codec.name.lower())
-            or "0"
-        )
-        > _VALUE_CODEC_DISABLED
-    ]
-    self.ref_sinks = {}
-
-  @override
-  async def async_setup_test(self) -> None:
-    await super().async_setup_test()
-    self.ref_sinks.clear()
-
-  def _setup_a2dp_device(self, codecs: list[_A2dpCodec]) -> None:
-    self.ref.device.sdp_service_records = {
-        _A2DP_SERVICE_RECORD_HANDLE: a2dp.make_audio_sink_service_sdp_records(
-            _A2DP_SERVICE_RECORD_HANDLE
-        ),
-    }
-
-    def on_avdtp_connection(server: avdtp.Protocol) -> None:
-      for codec in codecs:
-        self.ref_sinks[codec] = server.add_sink(
-            codec.get_default_capabilities()
-        )
-
-    avdtp_listener = avdtp.Listener.for_device(self.ref.device)
-    avdtp_listener.on(avdtp_listener.EVENT_CONNECTION, on_avdtp_connection)
 
   async def pair_and_connect(self) -> None:
     """Tests A2DP connection establishment right after a pairing session."""
     with self.dut.bl4a.register_callback(bl4a_api.Module.A2DP) as dut_cb:
-      self._setup_a2dp_device([_A2dpCodec.SBC])
+      a2dp_ext.setup_sink_server(
+          self.ref.device,
+          [a2dp_ext.A2dpCodec.SBC.get_default_capabilities()],
+          _A2DP_SERVICE_RECORD_HANDLE,
+      )
       await self.classic_connect_and_pair()
       await dut_cb.wait_for_event(
           bl4a_api.ProfileConnectionStateChanged(
