@@ -1,50 +1,29 @@
-{
-  "TestBeds": [
-    {
-      "Name": "default",
-      "Controllers": {
-        # Put device serials shown in `adb devices`
-        # Do not change the order!
-        "AndroidDevice": [
-          {
-            "serial": "33141FDJH0002A",
-            "label": "DUT"
-          },
-          {
-            "serial": "33141FDJH0002B",
-            "label": "REF"
-          },
-          {
-            "serial": "33141FDJH0002C",
-            "label": "REF"
-          }
-        ]
-      },
-      "TestParams": {
-        "max_retry_count": 2
-      }
-    },
-    {
-      "Name": "any",
-      "Controllers": {
-        "AndroidDevice": "*"
-      },
-      "TestParams": {
-        "max_retry_count": 2
-      }
-    },
-    {
-      "Name": "emulator",
-      "Controllers": {
-        "AndroidDevice": "*"
-      },
-      "TestParams": {
-        "crown_driver": "passthrough",
-        "crown_driver_specs": [
-          "tcp-client:127.0.0.1:7300",
-          "tcp-client:127.0.0.1:7300",
-        ]
-      }
-    }
-  ]
-}
+---
+TestBeds:
+- Name: default
+  Controllers:
+    # Put device serials shown in `adb devices`
+    # Do not change the order!
+    AndroidDevice:
+    - serial: 33141FDJH0002A
+      label: DUT
+    - serial: 33141FDJH0002B
+      label: REF
+    - serial: 33141FDJH0002C
+      label: REF
+  TestParams:
+    max_retry_count: 2
+- Name: any
+  Controllers:
+    AndroidDevice: "*"
+  TestParams:
+    max_retry_count: 2
+- Name: emulator
+  Controllers:
+    AndroidDevice: "*"
+  TestParams:
+    max_retry_count: 2
+    crown_driver: passthrough
+    crown_driver_specs:
+    - tcp-client:127.0.0.1:7300
+    - tcp-client:127.0.0.1:7300
