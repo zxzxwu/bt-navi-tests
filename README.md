@@ -123,20 +123,13 @@ device is `localhost:40155` and `localhost:46879`.
 * Specify the target and source device serial numbers:
 
 ```yaml
-"AndroidDevice": [
-    {
-    "serial": "localhost:33461",
-    "label": "DUT"
-    },
-    {
-    "serial": "localhost:40155",
-    "label": "REF"
-    },
-    {
-    "serial": "localhost:46879",
-    "label": "REF"
-    }
-]
+AndroidDevice:
+- serial: localhost:33461
+  label: DUT
+- serial: localhost:40155
+  label: REF
+- serial: localhost:46879
+  label: REF
 ```
 
 ### Run the test
@@ -173,7 +166,7 @@ results_uploader /tmp/logs/mobly/...
 To get all dumpsys, snoop, recorded audio, bugreports, add the following test params to config.yml:
 
 ```yml
-      "TestParams": {
-        "record_full_data": True
-      }
+  TestParams:
+    max_retry_count: 2
+    record_full_data: True
 ```
