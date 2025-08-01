@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-import contextlib
 import enum
 import itertools
 from typing import Any
@@ -214,12 +213,12 @@ class LePairingTest(navi_test_base.TwoDevicesTestBase):
     """Tests LE Secure pairing.
 
     Test steps:
-    1. Setup configurations.
-    2. Make ACL connections.
-    3. Start pairing.
-    4. Wait for pairing requests and verify pins.
-    5. Make actions corresponding to variants.
-    6. Verify final states.
+      1. Setup configurations.
+      2. Make ACL connections.
+      3. Start pairing.
+      4. Wait for pairing requests and verify pins.
+      5. Make actions corresponding to variants.
+      6. Verify final states.
 
     Args:
       variant: Action to perform in the pairing procedure.
@@ -385,16 +384,11 @@ class LePairingTest(navi_test_base.TwoDevicesTestBase):
 
     if pair_task:
       self.logger.info('[REF] Wait pairing complete.')
-      expected_errors: list[type[BaseException]]
-      match variant:
-        case TestVariant.REJECT | TestVariant.REJECTED:
-          expected_errors = [core.ProtocolError]
-        case TestVariant.DISCONNECTED:
-          expected_errors = [asyncio.exceptions.CancelledError]
-        case _:
-          expected_errors = []
-      with contextlib.suppress(*expected_errors):
+      if variant == TestVariant.ACCEPT:
         await pair_task
+      else:
+        with self.assertRaises((core.ProtocolError, asyncio.CancelledError)):
+          await pair_task
 
   @navi_test_base.parameterized(*(
       (
@@ -437,12 +431,12 @@ class LePairingTest(navi_test_base.TwoDevicesTestBase):
     """Tests LE Secure pairing.
 
     Test steps:
-    1. Setup configurations.
-    2. Make ACL connections.
-    3. Start pairing.
-    4. Wait for pairing requests and verify pins.
-    5. Make actions corresponding to variants.
-    6. Verify final states.
+      1. Setup configurations.
+      2. Make ACL connections.
+      3. Start pairing.
+      4. Wait for pairing requests and verify pins.
+      5. Make actions corresponding to variants.
+      6. Verify final states.
 
     Args:
       variant: Action to perform in the pairing procedure.
@@ -620,19 +614,11 @@ class LePairingTest(navi_test_base.TwoDevicesTestBase):
 
     if pair_task:
       self.logger.info('[REF] Wait pairing complete.')
-      expected_errors: list[type[BaseException]]
-      match variant:
-        case TestVariant.REJECT | TestVariant.REJECTED:
-          expected_errors = [core.ProtocolError]
-        case TestVariant.DISCONNECTED:
-          expected_errors = [
-              asyncio.exceptions.CancelledError,
-              core.ProtocolError,
-          ]
-        case _:
-          expected_errors = []
-      with contextlib.suppress(*expected_errors):
+      if variant == TestVariant.ACCEPT:
         await pair_task
+      else:
+        with self.assertRaises((core.ProtocolError, asyncio.CancelledError)):
+          await pair_task
 
   @navi_test_base.named_parameterized(*[
       dict(

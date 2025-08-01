@@ -15,13 +15,13 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
 import contextlib
 import decimal
 import struct
 import sys
 import tempfile
-from typing import TYPE_CHECKING, TypeAlias
+from typing import Sequence, TYPE_CHECKING, TypeAlias
+from unittest import mock
 import wave
 
 from bumble import core
@@ -65,13 +65,14 @@ _DEFAUILT_ADVERTISING_PARAMETERS = device.AdvertisingParameters(
 )
 _DEFAULT_STEP_TIMEOUT_SECONDS = 10.0
 _DEFAULT_RETRY_COUNT = 2
-_STREAMING_TIME_SECONDS = 1.0
+_STREAMING_TIME_SECONDS = 3.0
 _PREPARE_TIME_SECONDS = 0.5
 _CALLER_NAME = "Pixel Bluetooth"
 _CALLER_NUMBER = "123456789"
 _SINK_ASE_ID = 1
 _SOURCE_ASE_ID = 2
 _DEFAULT_FRAME_RATE = 48000
+_RECORDING_PATH = "/storage/self/primary/Recordings/record.wav"
 
 _ConnectionState = android_constants.ConnectionState
 _Direction = constants.Direction
@@ -253,6 +254,29 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
         self.dut.getprop(_AndroidProperty.CCP_SERVER_ENABLED) == "true"
     )
 
+    # TODO: Remove this when Bumble is fixed and synced.
+    origin_on_enable = ascs.AseStateMachine.on_enable
+
+    def on_enable(
+        ase: ascs.AseStateMachine, metadata: bytes
+    ) -> tuple[ascs.AseResponseCode, ascs.AseReasonCode]:
+      res = origin_on_enable(ase, metadata)
+      # CIS could be established before enable.
+      if cis_link := next(
+          (
+              cis_link
+              for cis_link in ase.service.device.cis_links.values()
+              if cis_link.cig_id == ase.cig_id and cis_link.cis_id == ase.cis_id
+          ),
+          None,
+      ):
+        ase.on_cis_establishment(cis_link)
+      return res
+
+    self.test_class_context.enter_context(
+        mock.patch.object(ascs.AseStateMachine, "on_enable", new=on_enable)
+    )
+
   @override
   async def async_setup_test(self) -> None:
     # Disable the allow list to allow the connect LE Audio to Bumble.
@@ -268,15 +292,6 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
 
   @override
   async def async_teardown_test(self) -> None:
-    # TODO: Remove this once the bug is fixed.
-    # When turning off Bluetooth during LEA connection, Bluetooth Manager
-    # Service may stuck and cause the following tests to fail.
-    try:
-      self.dut.bt.disable()
-    except Exception:  # pylint: disable=broad-except
-      self.logger.error("Failed to disable Bluetooth, force kill")
-      self.dut.shell("pkill bluetooth")
-
     # Make sure audio is stopped before starting the test.
     await asyncio.to_thread(self.dut.bt.audioStop)
     # Reset to the default value.
@@ -419,6 +434,8 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
       4. Stop audio streaming from DUT and end the call.
       5. Wait for audio streaming to stop from REF.
     """
+    sink_ase = self.ref_ascs.ase_state_machines[_SINK_ASE_ID]
+    source_ase = self.ref_ascs.ase_state_machines[_SOURCE_ASE_ID]
     self.dut.bl4a.set_audio_attributes(
         bl4a_api.AudioAttributes(usage=bl4a_api.AudioAttributes.Usage.GAME),
         handle_audio_focus=False,
@@ -444,15 +461,28 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
     await asyncio.to_thread(self.dut.bt.audioPlaySine)
     async with self.assert_not_timeout(
         _DEFAULT_STEP_TIMEOUT_SECONDS,
-        msg="[REF] Wait for audio to start",
+        msg="[REF] Wait for sink ASE to start",
     ):
-      for ase in self.ref_ascs.ase_state_machines.values():
-        await _wait_for_ase_state(ase, ascs.AseStateMachine.State.STREAMING)
+      await _wait_for_ase_state(sink_ase, ascs.AseStateMachine.State.STREAMING)
+
+    self.logger.info("[DUT] Start audio recording")
+    recorder = await asyncio.to_thread(
+        lambda: self.dut.bl4a.start_audio_recording(
+            _RECORDING_PATH,
+            source=bl4a_api.AudioRecorder.Source.VOICE_PERFORMANCE,
+        )
+    )
+    self.test_case_context.push(recorder)
+    async with self.assert_not_timeout(
+        _DEFAULT_STEP_TIMEOUT_SECONDS,
+        msg="[REF] Wait for source ASE to start",
+    ):
+      await _wait_for_ase_state(
+          source_ase, ascs.AseStateMachine.State.STREAMING
+      )
 
     # Check codec configuration.
-    sink_ase = self.ref_ascs.ase_state_machines[_SINK_ASE_ID]
     sink_freq = self._get_sampling_frequency(sink_ase)
-    source_ase = self.ref_ascs.ase_state_machines[_SOURCE_ASE_ID]
     source_freq = self._get_sampling_frequency(source_ase)
     self.logger.info("sink_freq: %r, source_freq: %r", sink_freq, source_freq)
 
@@ -469,6 +499,7 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
 
     self.logger.info("[DUT] Stop audio streaming")
     await asyncio.to_thread(self.dut.bt.audioStop)
+    recorder.close()
     async with self.assert_not_timeout(
         _DEFAULT_STEP_TIMEOUT_SECONDS,
         msg="[REF] Wait for audio to stop",
@@ -495,6 +526,14 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
         constants.Direction.OUTGOING,
     )
     sink_ase = self.ref_ascs.ase_state_machines[_SINK_ASE_ID]
+    source_ase = self.ref_ascs.ase_state_machines[_SOURCE_ASE_ID]
+    self.dut.bl4a.set_audio_attributes(
+        bl4a_api.AudioAttributes(
+            usage=bl4a_api.AudioAttributes.Usage.VOICE_COMMUNICATION,
+            content_type=bl4a_api.AudioAttributes.ContentType.SPEECH,
+        ),
+        handle_audio_focus=False,
+    )
 
     with call:
       await dut_telecom_cb.wait_for_event(
@@ -512,15 +551,29 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
 
       self.logger.info("[DUT] Start audio streaming")
       await asyncio.to_thread(self.dut.bt.audioPlaySine)
-
       async with self.assert_not_timeout(
           _DEFAULT_STEP_TIMEOUT_SECONDS,
-          msg="[REF] Wait for audio to start",
+          msg="[REF] Wait for sink ASE to start",
       ):
-        # With current configuration, all ASEs will be active in bidirectional
-        # streaming.
-        for ase in self.ref_ascs.ase_state_machines.values():
-          await _wait_for_ase_state(ase, ascs.AseStateMachine.State.STREAMING)
+        await _wait_for_ase_state(
+            sink_ase, ascs.AseStateMachine.State.STREAMING
+        )
+
+      self.logger.info("[DUT] Start audio recording")
+      recorder = await asyncio.to_thread(
+          lambda: self.dut.bl4a.start_audio_recording(
+              _RECORDING_PATH,
+              source=bl4a_api.AudioRecorder.Source.VOICE_COMMUNICATION,
+          )
+      )
+      self.test_case_context.push(recorder)
+      async with self.assert_not_timeout(
+          _DEFAULT_STEP_TIMEOUT_SECONDS,
+          msg="[REF] Wait for source ASE to start",
+      ):
+        await _wait_for_ase_state(
+            source_ase, ascs.AseStateMachine.State.STREAMING
+        )
 
       # Setup audio sink.
       sink_frames = list[bytes]()
@@ -539,6 +592,7 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
       self.logger.info("[DUT] Stop audio streaming")
       cis_link.sink = None
       await asyncio.to_thread(self.dut.bt.audioStop)
+      recorder.close()
 
     async with self.assert_not_timeout(
         _DEFAULT_STEP_TIMEOUT_SECONDS,
@@ -605,6 +659,13 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
       # Start audio streaming from DUT.
       self.dut.bt.audioSetRepeat(android_constants.RepeatMode.ONE)
       self.dut.bt.audioPlaySine()
+      recorder = await asyncio.to_thread(
+          lambda: self.dut.bl4a.start_audio_recording(
+              _RECORDING_PATH,
+              source=bl4a_api.AudioRecorder.Source.VOICE_COMMUNICATION,
+          )
+      )
+      stack.enter_context(recorder)
 
       dut_leaudio_cb = self.dut.bl4a.register_callback(bl4a_api.Module.LE_AUDIO)
       stack.enter_context(dut_leaudio_cb)
@@ -1211,6 +1272,11 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
       3. Disconnect from REF.
       4. Wait for player paused.
     """
+    if self.dut.device.is_emulator:
+      self.skipTest(
+          "b/434613780 - Disconnection on streaming may cause Rootcanal crash."
+      )
+
     # Enable audio noisy handling.
     self.dut.bt.setHandleAudioBecomingNoisy(True)
 

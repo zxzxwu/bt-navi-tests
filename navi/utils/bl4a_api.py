@@ -335,7 +335,7 @@ class JsonDeserializableEvent:
     kwargs: dict[str, Any] = {}
     for field in dataclasses.fields(cls):
       json_field = field.metadata.get(_FIELD, field.name)
-      value = mapping[json_field]
+      value = mapping.get(json_field)
       mapper = field.metadata.get(_MAPPER, lambda x: x)
       kwargs[field.name] = mapper(value) if value is not None else None
     return cls(**kwargs)
@@ -818,6 +818,26 @@ class GattCharacteristicChanged(JsonDeserializableEvent):
   )
 
   EVENT_NAME = snippet_constants.GATT_CHARACTERISTIC_CHANGED
+
+
+@dataclasses.dataclass
+class GattSubrateChanged(JsonDeserializableEvent):
+  """android.bluetooth.BluetoothGattCallback.onSubrateChange."""
+
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  subrate_mode: android_constants.LeSubrateMode = dataclasses.field(
+      metadata={
+          _FIELD: snippet_constants.GATT_FIELD_SUBRATE_MODE,
+          _MAPPER: android_constants.LeSubrateMode,
+      }
+  )
+  status: int = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_STATUS}
+  )
+
+  EVENT_NAME = snippet_constants.GATT_SUBRATE_CHANGED
 
 
 @dataclasses.dataclass
@@ -1588,20 +1608,41 @@ class PhoneCall:
 class AudioRecorder:
   """Context managable AudioRecorder wrapper."""
 
+  class Source(enum.IntEnum):
+    """android.media.MediaRecorder.Source."""
+
+    DEFAULT = 0
+    MIC = 1
+    VOICE_UPLINK = 2
+    VOICE_DOWNLINK = 3
+    VOICE_CALL = 4
+    CAMCORDER = 5
+    VOICE_RECOGNITION = 6
+    VOICE_COMMUNICATION = 7
+    REMOTE_SUBMIX = 8
+    UNPROCESSED = 9
+    VOICE_PERFORMANCE = 10
+    ECHO_REFERENCE = 1997
+    RADIO_TUNER = 1998
+    HOTWORD = 1999
+    ULTRASOUND = 2000
+
   def __init__(
       self,
       snippet: snippet_stub.BluetoothSnippet,
       path: str,
+      source: Source,
   ):
     """Class initializer.
 
     Args:
         snippet: snippet client instance.
         path: Path on device to save the recorded media file.
+        source: Source of the audio to record.
     """
     self.snippet = snippet
     self.path = path
-    snippet.startRecording(path)
+    snippet.startRecording(path, source)
 
   def close(self) -> None:
     """Closes the phone call."""
@@ -2203,6 +2244,25 @@ class GattClient(CallbackHandler):
         android_constants.Phy(event.data[snippet_constants.FIELD_RX_PHY]),
     )
 
+  async def request_connection_priority(
+      self, connection_priority: android_constants.ConnectionPriority
+  ) -> android_constants.ConnectionPriority:
+    """Requests connection priority.
+
+    Args:
+      connection_priority: Target connection priority.
+
+    Returns:
+      Updated connection priority.
+
+    Raises:
+      ConnectionError: Unable to request connection priority.
+    """
+    self.snippet.gattRequestConnectionPriority(
+        self.handler.callback_id, connection_priority
+    )
+    return connection_priority
+
   async def request_subrate_mode(
       self, mode: android_constants.LeSubrateMode
   ) -> android_constants.LeSubrateMode:
@@ -2217,9 +2277,19 @@ class GattClient(CallbackHandler):
     Raises:
       ConnectionError: Unable to request subrate mode.
     """
-    self.snippet.gattRequestSubrateMode(self.handler.callback_id, mode)
-    # TODO: Wait for subrate mode update event.
-    return mode
+    # Clear all previous events.
+    self.handler.getAll(snippet_constants.GATT_SUBRATE_CHANGED)
+    status = self.snippet.gattRequestSubrateMode(self.handler.callback_id, mode)
+    if status != android_constants.GattStatus.SUCCESS:
+      raise errors.ConnectionError(
+          f'Unable to request subrate mode, status={status}'
+      )
+    event = await self.wait_for_event(GattSubrateChanged)
+    if event.status != android_constants.GattStatus.SUCCESS:
+      raise errors.ConnectionError(
+          f'Unable to request subrate mode, status={event.status}'
+      )
+    return event.subrate_mode
 
 
 _EVENT = TypeVar('_EVENT', bound=JsonDeserializableEvent)
@@ -2669,16 +2739,21 @@ class SnippetWrapper:
         direction=direction,
     )
 
-  def start_audio_recording(self, path: str) -> AudioRecorder:
+  def start_audio_recording(
+      self,
+      path: str,
+      source: AudioRecorder.Source = AudioRecorder.Source.DEFAULT,
+  ) -> AudioRecorder:
     """Starts audio recording.
 
     Args:
       path: Path to the recording file.
+      source: Source of the audio recording.
 
     Returns:
       The audio recorder control block.
     """
-    return AudioRecorder(self.snippet, path)
+    return AudioRecorder(self.snippet, path, source)
 
   def create_bond_oob(
       self,

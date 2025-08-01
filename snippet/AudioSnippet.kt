@@ -299,7 +299,7 @@ class AudioSnippet : Snippet {
 
   /** Starts a recorder streaming to [outputPath]. */
   @Rpc(description = "Start recording")
-  fun startRecording(outputPath: String) {
+  fun startRecording(outputPath: String, @RpcOptional source: Int? = null) {
     if (outputPath in recorders) {
       throw IllegalArgumentException("$outputPath is already recording")
     }
@@ -311,7 +311,7 @@ class AudioSnippet : Snippet {
       ) * 2
     val recorder =
       AudioRecord(
-        MediaRecorder.AudioSource.MIC,
+        source ?: MediaRecorder.AudioSource.DEFAULT,
         48000,
         AudioFormat.CHANNEL_IN_STEREO,
         AudioFormat.ENCODING_PCM_16BIT,

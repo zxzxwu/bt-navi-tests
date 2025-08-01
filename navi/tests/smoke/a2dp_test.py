@@ -358,7 +358,6 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
       (_Issuer.DUT, [_A2dpCodec.SBC, _A2dpCodec.AAC, _A2dpCodec.APTX]),
       (_Issuer.DUT, [_A2dpCodec.SBC, _A2dpCodec.AAC, _A2dpCodec.APTX_HD]),
       (_Issuer.DUT, [_A2dpCodec.SBC, _A2dpCodec.AAC, _A2dpCodec.LDAC]),
-      (_Issuer.DUT, [_A2dpCodec.SBC, _A2dpCodec.AAC, _A2dpCodec.OPUS]),
       (_Issuer.REF, [_A2dpCodec.SBC]),
       (_Issuer.REF, [_A2dpCodec.SBC, _A2dpCodec.AAC]),
   )

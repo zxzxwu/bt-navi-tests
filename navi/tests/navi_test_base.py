@@ -15,6 +15,7 @@
 """Base classes for Bluetooth tests."""
 
 import asyncio
+import collections
 from collections.abc import AsyncGenerator, Callable, Coroutine, Sequence
 import contextlib
 import dataclasses
@@ -444,9 +445,9 @@ class BaseTestBase(base_test.BaseTestClass, absltest.TestCase):
   def _get_test_methods(
       self, test_names: list[str]
   ) -> list[tuple[str, Callable[..., Any]]]:
-    methods = list[tuple[str, Callable[..., Any]]]()
+    methods = collections.OrderedDict[str, Callable[..., Any]]()
     for test_name in test_names:
-      if not test_name.startswith("test_") and not test_name.startswith("r:"):
+      if not test_name.startswith(("test_", "r:", "shard:")):
         raise base_test.Error(
             f"Test method name {test_name} does not follow naming convention"
             " test_* or regex matcher r:(regex pattern), abort."
@@ -454,15 +455,31 @@ class BaseTestBase(base_test.BaseTestClass, absltest.TestCase):
 
       if test_name.startswith("r:"):
         test_name_pattern = re.compile(test_name[2:])
-        methods.extend(
+        methods.update(
             (test_name, test_method)
             for test_name, test_method in self._generated_test_table.items()
             if test_name_pattern.fullmatch(test_name)
         )
+      elif test_name.startswith("shard:"):
+        m = re.fullmatch(r"(\d+)/(\d+)", test_name[6:])
+        if not m:
+          raise ValueError(f"Invalid shard format: {test_name}")
+        shard_index = int(m.group(1)) - 1  # 1-index to 0-index
+        shard_count = int(m.group(2))
+        test_count = len(self._generated_test_table)
+        test_per_shard = test_count // shard_count + min(
+            test_count % shard_count, 1
+        )
+        methods.update({
+            test_name: test_method
+            for test_name, test_method in list(
+                self._generated_test_table.items()
+            )[test_per_shard * shard_index : test_per_shard * (shard_index + 1)]
+        })
       elif test_method := self._generated_test_table.get(test_name):
-        methods.append((test_name, test_method))
+        methods[test_name] = test_method
 
-    return methods
+    return list(methods.items())
 
   @override
   def get_existing_test_names(self) -> list[str]:
@@ -656,6 +673,7 @@ class AndroidBumbleTestBase(BaseTestBase):
   ] = AndroidSnippetDeviceWrapper
   _refs: Sequence[crown.CrownDevice] = ()
   NUM_REF_DEVICES: int
+  test_case_log_handler: logging.FileHandler | None = None
 
   def _get_passthrough_hci_specs(self) -> list[str]:
     hci_specs = self.user_params.get("crown_driver_specs", [])
@@ -792,6 +810,21 @@ class AndroidBumbleTestBase(BaseTestBase):
   @retry_lib.retry_on_exception()
   @override
   async def async_setup_test(self) -> None:
+    await super().async_setup_test()
+
+    # Bumble logger.
+    self.test_case_log_handler = logging.FileHandler(
+        pathlib.Path(self.current_test_info.output_path, "test_log.DEBUG")
+    )
+    self.test_case_log_handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s.%(msecs).03d %(levelname)s %(message)s",
+            "%m-%d %H:%M:%S",
+        )
+    )
+    self.test_case_log_handler.setLevel(logging.DEBUG)
+    logging.getLogger().addHandler(self.test_case_log_handler)
+
     # Make sure Bluetooth is enabled before factory reset.
     self.assertTrue(self.dut.bt.enable())
 
@@ -821,6 +854,13 @@ class AndroidBumbleTestBase(BaseTestBase):
         raise signals.TestAbortAll(
             "DUT is disconnected, cannot continue the test."
         ) from e
+    # Collect logcat.
+    self.dut.device.services.create_output_excerpts_all(self.current_test_info)
+    # Close test case log handler.
+    if self.test_case_log_handler is not None:
+      self.test_case_log_handler.close()
+      logging.getLogger().removeHandler(self.test_case_log_handler)
+      self.test_case_log_handler = None
     await super().async_teardown_test()
 
   @override
