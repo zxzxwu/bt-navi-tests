@@ -84,12 +84,12 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
     """Tests Classic SSP pairing.
 
     Test steps:
-    1. Setup configurations.
-    2. Make ACL connections.
-    3. Start pairing.
-    4. Wait for pairing requests and verify pins.
-    5. Make actions corresponding to variants.
-    6. Verify final states.
+      1. Setup configurations.
+      2. Make ACL connections.
+      3. Start pairing.
+      4. Wait for pairing requests and verify pins.
+      5. Make actions corresponding to variants.
+      6. Verify final states.
 
     Args:
       variant: Action to perform in the pairing procedure.

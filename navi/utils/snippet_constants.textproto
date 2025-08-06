@@ -534,6 +534,11 @@ constants {
 }
 
 constants {
+  name: "GATT_FIELD_SUBRATE_MODE"
+  string_value: "subrate_mode"
+}
+
+constants {
   name: "GATT_CONNECTION_STATE_CHANGE"
   string_value: "GATT_CONNECTION_STATE_CHANGE"
 }
@@ -581,6 +586,11 @@ constants {
 constants {
   name: "GATT_MTU_CHANGED"
   string_value: "GATT_MTU_CHANGED"
+}
+
+constants {
+  name: "GATT_SUBRATE_CHANGED"
+  string_value: "GATT_SUBRATE_CHANGED"
 }
 
 # =========================== #
@@ -747,7 +757,7 @@ constants {
 
 constants {
   name: "CONTENT_TYPE"
-  string_value: "CONTENT_TYPE"
+  string_value: "content_type"
 }
 
 constants: {
