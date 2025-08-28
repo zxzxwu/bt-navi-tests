@@ -75,8 +75,6 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
     await super().async_setup_class()
     if self.dut.getprop(android_constants.Property.HFP_AG_ENABLED) != "true":
       raise signals.TestAbortClass("HFP(AG) is not enabled on DUT.")
-    # Make sure Bumble is on.
-    await self.ref.open()
 
   @override
   async def async_teardown_test(self) -> None:
@@ -254,10 +252,25 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
         timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
     )
 
-  @navi_test_base.parameterized(
-      ([_AudioCodec.CVSD],),
-      ([_AudioCodec.CVSD, _AudioCodec.MSBC],),
-      ([_AudioCodec.LC3_SWB, _AudioCodec.CVSD, _AudioCodec.MSBC],),
+  @navi_test_base.named_parameterized(
+      cvsd_only=dict(
+          supported_audio_codecs=[
+              _AudioCodec.CVSD,
+          ]
+      ),
+      cvsd_msbc=dict(
+          supported_audio_codecs=[
+              _AudioCodec.CVSD,
+              _AudioCodec.MSBC,
+          ]
+      ),
+      cvsd_msbc_lc3_swb=dict(
+          supported_audio_codecs=[
+              _AudioCodec.CVSD,
+              _AudioCodec.MSBC,
+              _AudioCodec.LC3_SWB,
+          ]
+      ),
   )
   async def test_call_sco_connection_with_codec_negotiation(
       self,

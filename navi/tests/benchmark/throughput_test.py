@@ -15,6 +15,7 @@
 import asyncio
 import logging
 
+from bumble import core
 from bumble import gatt
 from bumble import gatt_client as gatt_client_module
 from bumble import gatt_server
@@ -50,6 +51,8 @@ _EXPECTED_THROUGHPUT_BYTES_PER_SECOND = {
 }
 _SERVICE_UUID = "eb4d86c3-4274-4724-a17b-387ad0cba6c3"
 _CHARACTERISTIC_UUID = "eb4d86c3-4274-4724-a17b-387ad0cba6c4"
+_RFCOMM_SERVICE_RECORD_HANDLE = 1
+_RFCOMM_UUID = "130c8436-15ac-4d08-aa60-595af4547e8d"
 _BUMBLE_SPAM_MODULES = (
     l2cap,
     rfcomm,
@@ -160,7 +163,6 @@ class ThroughputTest(navi_test_base.TwoDevicesTestBase):
             address=self.ref.address,
             secure=False,
             psm=server.psm,
-            transport=android_constants.Transport.LE,
             address_type=android_constants.AddressTypeStatus.PUBLIC,
         ),
     )
@@ -362,6 +364,13 @@ class ThroughputTest(navi_test_base.TwoDevicesTestBase):
     channel = rfcomm.Server(self.ref.device).listen(
         acceptor=ref_accept_future.set_result
     )
+    self.ref.device.sdp_service_records[_RFCOMM_SERVICE_RECORD_HANDLE] = (
+        rfcomm.make_service_sdp_records(
+            service_record_handle=_RFCOMM_SERVICE_RECORD_HANDLE,
+            channel=channel,
+            uuid=core.UUID(_RFCOMM_UUID),
+        )
+    )
     self.logger.info("[REF] Listen RFCOMM on channel %d.", channel)
 
     self.logger.info("[DUT] Connect RFCOMM channel to REF.")
@@ -371,7 +380,7 @@ class ThroughputTest(navi_test_base.TwoDevicesTestBase):
           self.dut.bl4a.create_rfcomm_channel(
               address=self.ref.address,
               secure=True,
-              channel_or_uuid=channel,
+              uuid=_RFCOMM_UUID,
           ),
       )
 

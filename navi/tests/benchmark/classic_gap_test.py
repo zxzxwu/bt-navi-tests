@@ -14,17 +14,19 @@
 
 import asyncio
 import datetime
-import statistics
+from unittest import mock
 
 from bumble import core
 from bumble import device
 from bumble import hci
 from bumble import pairing
+from bumble import rfcomm
 from bumble import smp
 from mobly import test_runner
 
 from navi.tests import navi_test_base
 from navi.tests.benchmark import performance_tool
+from navi.tests.benchmark import test_base
 from navi.tests.smoke import pairing_utils
 from navi.utils import android_constants
 from navi.utils import bl4a_api
@@ -39,25 +41,60 @@ _MAJOR_CASE_DEFAULT_REPEAT_TIMES = 50
 _MINOR_CASE_DEFAULT_REPEAT_TIMES = 5
 _DEFAULT_REPEAT_TIMES = 50
 _DEFAULT_STEP_TIMEOUT_SECONDS = 5.0
+_RFCOMM_SERVICE_RECORD_HANDLE = 1
+_RFCOMM_UUID = "130c8436-15ac-4d08-aa60-595af4547e8d"
 _Direction = constants.Direction
 _Role = hci.Role
 _IoCapability = pairing.PairingDelegate.IoCapability
 _Callback = bl4a_api.CallbackHandler
 
 
-class ClassicGapTest(navi_test_base.TwoDevicesTestBase):
+class ClassicGapTest(test_base.PerformanceTestBase):
   pairing_delegate: pairing_utils.PairingDelegate
 
+  async def test_inquiry(self) -> None:
+    """Test inquiry.
+
+    Test steps:
+      1. Set REF in discoverable mode.
+      2. Start discovery on DUT.
+      3. Wait for DUT discovered or timeout(15 seconds).
+      4. Check result(should be discovered).
+    """
+    latency_list = list[float]()
+    for i in range(_DEFAULT_REPEAT_TIMES):
+      try:
+        with self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER) as dut_cb:
+          await self.ref.device.set_discoverable(True)
+          with performance_tool.Stopwatch() as stop_watch:
+            self.dut.bt.startInquiry()
+
+            await dut_cb.wait_for_event(
+                bl4a_api.DeviceFound(address=self.ref.address, name=mock.ANY)
+            )
+          latency_seconds = stop_watch.elapsed_time.total_seconds()
+          self.success_attempt_record(
+              test_round=i + 1,
+              latency=latency_seconds,
+              latency_list=latency_list,
+          )
+      except (core.BaseBumbleError, AssertionError):
+        self.logger.exception("Failed to make inquiry")
+      finally:
+        self.dut.bt.stopInquiry()
+    self.record_sponge_data(
+        repeat_times=_DEFAULT_REPEAT_TIMES, latency_list=latency_list
+    )
+
   async def test_incoming_connection(self) -> None:
-    """Tests RFCOMM incoming connection.
+    """Tests ACL incoming connection.
 
     Test steps:
       1. REF sends connection request to DUT.
       2. DUT accepts the connection.
       3. REF terminates the connection.
-      4. Repeat step 1-3 for 50 times.
+      4. Repeat step 1-3.
     """
-    success_count = 0
     latency_list = list[float]()
     for i in range(_DEFAULT_REPEAT_TIMES):
       try:
@@ -70,40 +107,70 @@ class ClassicGapTest(navi_test_base.TwoDevicesTestBase):
           self.logger.info("[REF] Connected to DUT.")
 
         latency_seconds = stop_watch.elapsed_time.total_seconds()
-        self.logger.info(
-            "Success connection in %.2f seconds", latency_seconds
+        self.success_attempt_record(
+            test_round=i + 1,
+            latency=latency_seconds,
+            latency_list=latency_list,
         )
-        self.logger.info("Test %d Success", i + 1)
-        latency_list.append(latency_seconds)
-        success_count += 1
       except (core.BaseBumbleError, AssertionError):
         self.logger.exception("Failed to make ACL connection")
       finally:
         await performance_tool.cleanup_connections(self.dut, self.ref)
-    self.logger.info(
-        "[success rate] Passes: %d / Attempts: %d",
-        success_count,
-        _DEFAULT_REPEAT_TIMES,
+    self.record_sponge_data(
+        repeat_times=_DEFAULT_REPEAT_TIMES, latency_list=latency_list
     )
-    self.logger.info(
-        "[connection time] avg: %.2f, min: %.2f, max: %.2f, stdev: %.2f",
-        statistics.mean(latency_list),
-        min(latency_list),
-        max(latency_list),
-        statistics.stdev(latency_list),
-    )
-    self.record_data(
-        navi_test_base.RecordData(
-            test_name=self.current_test_info.name,
-            properties={
-                "passes": success_count,
-                "attempts": _DEFAULT_REPEAT_TIMES,
-                "avg_latency": statistics.mean(latency_list),
-                "min_latency": min(latency_list),
-                "max_latency": max(latency_list),
-                "stdev_latency": statistics.stdev(latency_list),
-            },
+
+  async def test_outgoing_connection(self) -> None:
+    """Tests ACL outgoing connection.
+
+    Test steps:
+      1. DUT creates RFCOMM channel.
+      2. ACL connection is established.
+      3. REF terminates the connection.
+      4. Repeat step 1-3.
+    """
+    latency_list = list[float]()
+    await self.classic_connect_and_pair()
+    await performance_tool.terminate_connection_from_ref(self.dut, self.ref)
+    channel = rfcomm.Server(self.ref.device).listen(acceptor=mock.MagicMock())
+    self.ref.device.sdp_service_records[_RFCOMM_SERVICE_RECORD_HANDLE] = (
+        rfcomm.make_service_sdp_records(
+            service_record_handle=_RFCOMM_SERVICE_RECORD_HANDLE,
+            channel=channel,
+            uuid=core.UUID(_RFCOMM_UUID),
         )
+    )
+    for i in range(_DEFAULT_REPEAT_TIMES):
+      try:
+        with performance_tool.Stopwatch() as stop_watch:
+          with self.dut.bl4a.register_callback(
+              bl4a_api.Module.ADAPTER
+          ) as dut_cb:
+            self.logger.info("[DUT] Create RFCOMM channel.")
+            future = self.dut.bl4a.create_rfcomm_channel_async(
+                address=self.ref.address,
+                secure=True,
+                uuid=_RFCOMM_UUID,
+            )
+            self.logger.info("[DUT] Wait for ACL connection.")
+            await dut_cb.wait_for_event(
+                bl4a_api.AclConnected(
+                    address=self.ref.address,
+                    transport=android_constants.Transport.CLASSIC,
+                ),
+                timeout=datetime.timedelta(seconds=30),
+            )
+            latency_seconds = stop_watch.elapsed_time.total_seconds()
+            await future
+        self.success_attempt_record(
+            test_round=i + 1, latency=latency_seconds, latency_list=latency_list
+        )
+      except (core.BaseBumbleError, AssertionError):
+        self.logger.exception("Failed to make ACL connection")
+      finally:
+        await performance_tool.terminate_connection_from_ref(self.dut, self.ref)
+    self.record_sponge_data(
+        repeat_times=_DEFAULT_REPEAT_TIMES, latency_list=latency_list
     )
 
   async def _test_ssp_pairing_async(
@@ -318,9 +385,8 @@ class ClassicGapTest(navi_test_base.TwoDevicesTestBase):
     """
     # [REF] Disable SMP over Classic L2CAP channel.
 
-    success_count = 0
-    latency_list = []
-    for _ in range(default_repeat_times):
+    latency_list = list[float]()
+    for i in range(default_repeat_times):
       try:
         self.ref.device.l2cap_channel_manager.deregister_fixed_channel(
             smp.SMP_BR_CID
@@ -329,43 +395,22 @@ class ClassicGapTest(navi_test_base.TwoDevicesTestBase):
             io_capability=ref_io_capability,
             auto_accept=True,
         )
-        latency_list.append(await self._test_ssp_pairing_async(
+        latency_seconds = await self._test_ssp_pairing_async(
             pairing_direction=pairing_direction,
             ref_io_capability=ref_io_capability,
             ref_role=ref_role,
-        ))
-        success_count += 1
+        )
+        self.success_attempt_record(
+            test_round=i + 1, latency=latency_seconds, latency_list=latency_list
+        )
       except (core.BaseBumbleError, AssertionError):
         self.logger.exception("Failed to make outgoing pairing")
-      finally:
         self.dut.bt.removeBond(self.ref.address)
         await performance_tool.cleanup_connections(self.dut, self.ref)
+    self.record_sponge_data(
+        repeat_times=default_repeat_times, latency_list=latency_list
+    )
 
-    self.logger.info(
-        "[success rate] Passes: %d / Attempts: %d",
-        success_count,
-        default_repeat_times,
-    )
-    self.logger.info(
-        "[connection time] avg: %.2f, min: %.2f, max: %.2f, stdev: %.2f",
-        statistics.mean(latency_list),
-        min(latency_list),
-        max(latency_list),
-        statistics.stdev(latency_list),
-    )
-    self.record_data(
-        navi_test_base.RecordData(
-            test_name=self.current_test_info.name,
-            properties={
-                "passes": success_count,
-                "attempts": default_repeat_times,
-                "avg_latency": statistics.mean(latency_list),
-                "min_latency": min(latency_list),
-                "max_latency": max(latency_list),
-                "stdev_latency": statistics.stdev(latency_list),
-            },
-        )
-    )
 
 if __name__ == "__main__":
   test_runner.main()

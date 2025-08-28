@@ -12,71 +12,29 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-import asyncio
-
 from bumble import core
 from bumble import hci
 from mobly import test_runner
-from typing_extensions import override
 
-from navi.tests import navi_test_base
 from navi.tests.benchmark import performance_tool
+from navi.tests.benchmark import test_base
 from navi.utils import android_constants
 from navi.utils import bl4a_api
-from navi.utils import retry
 
 _DEFAULT_REPEAT_TIMES = 100
 _ADVERTISING_INTERVAL_MIN = 20
 _SETUP_TIMEOUT_SEC = 10.0
 
 _Callback = bl4a_api.CallbackHandler
+_OwnAddressType = hci.OwnAddressType
 
 
-class LeGapTest(navi_test_base.TwoDevicesTestBase):
-
-  @override
-  async def async_setup_class(self) -> None:
-    await super().async_setup_class()
-
-    @retry.retry_on_exception()
-    async def setup_inner() -> None:
-      async with self.assert_not_timeout(_SETUP_TIMEOUT_SEC):
-        await self.ref.open()
-
-      self.assertTrue(self.dut.bt.enable())
-      self.assertTrue(self.dut.bt.factoryReset())
-
-    await setup_inner()
-
-  @retry.retry_on_exception()
-  async def _cleanup_connections(self) -> None:
-    # There might be crash during the test.
-    # Make sure Bluetooth is enabled before test start.
-    self.assertTrue(self.dut.bt.enable())
-
-    with self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER) as dut_cb:
-      ref_address = self.ref.address
-      connected_on_transport = [
-          transport
-          for transport in [
-              android_constants.Transport.LE,
-              android_constants.Transport.CLASSIC,
-          ]
-          if self.dut.bt.getDeviceConnected(ref_address, transport)
-      ]
-      async with self.assert_not_timeout(_SETUP_TIMEOUT_SEC):
-        await self.ref.reset()
-      for transport in connected_on_transport:
-        await dut_cb.wait_for_event(
-            bl4a_api.AclDisconnected(ref_address, transport=transport)
-        )
-    # Leave a gap between tests.
-    await asyncio.sleep(1.0)
+class LeGapTest(test_base.PerformanceTestBase):
 
   async def test_le_connection_outgoing(self) -> None:
     """Test make outgoing LE connections."""
-    success_count = 0
-    for _ in range(_DEFAULT_REPEAT_TIMES):
+    latency_list = list[float]()
+    for i in range(_DEFAULT_REPEAT_TIMES):
       try:
         await self.ref.device.start_advertising(
             own_address_type=hci.OwnAddressType.RANDOM,
@@ -91,27 +49,71 @@ class LeGapTest(navi_test_base.TwoDevicesTestBase):
               address_type=android_constants.AddressTypeStatus.RANDOM,
               retry_count=0,
           )
-        self.logger.info(
-            "Success connection in %.2f seconds",
-            stop_watch.elapsed_time.total_seconds(),
-        )
+        latency_seconds = stop_watch.elapsed_time.total_seconds()
         await client.disconnect()
         client.close()
-        success_count += 1
+        self.success_attempt_record(
+            test_round=i + 1,
+            latency=latency_seconds,
+            latency_list=latency_list,
+        )
       except (core.BaseBumbleError, AssertionError):
         self.logger.exception("Failed to make LE connection")
       finally:
-        await self._cleanup_connections()
-    self.logger.info(
-        "Passes: %d / Attempts: %d", success_count, _DEFAULT_REPEAT_TIMES
+        await performance_tool.cleanup_connections(self.dut, self.ref)
+    self.record_sponge_data(
+        repeat_times=_DEFAULT_REPEAT_TIMES, latency_list=latency_list
     )
-    self.record_data({
-        "Test Name": self.current_test_info.name,
-        "properties": {
-            "passes": success_count,
-            "attempts": _DEFAULT_REPEAT_TIMES,
-        },
-    })
+
+  async def test_le_connection_incoming(self) -> None:
+    """Test make incoming LE connections."""
+    latency_list = list[float]()
+    for i in range(_DEFAULT_REPEAT_TIMES):
+      try:
+        self.logger.info("[DUT] Start advertising")
+        await self.dut.bl4a.start_legacy_advertiser(
+            bl4a_api.LegacyAdvertiseSettings(
+                own_address_type=_OwnAddressType.PUBLIC
+            ),
+        )
+        with self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER) as dut_cb:
+          with performance_tool.Stopwatch() as stop_watch:
+            self.logger.info("[REF] Connect GATT")
+            ref_dut_acl = await self.ref.device.connect(
+                f"{self.dut.address}/P",
+                core.BT_LE_TRANSPORT,
+                own_address_type=_OwnAddressType.PUBLIC,
+            )
+            await ref_dut_acl.get_remote_le_features()
+            self.logger.info("[DUT] Wait for LE-ACL connected")
+            await dut_cb.wait_for_event(
+                event=bl4a_api.AclConnected(
+                    address=self.ref.address,
+                    transport=android_constants.Transport.LE,
+                ),
+            )
+          latency_seconds = stop_watch.elapsed_time.total_seconds()
+          self.success_attempt_record(
+              test_round=i + 1,
+              latency=latency_seconds,
+              latency_list=latency_list,
+          )
+          self.logger.info("[REF] Disconnect")
+          await ref_dut_acl.disconnect()
+          self.logger.info("[DUT] Wait for LE-ACL disconnected")
+          await dut_cb.wait_for_event(
+              bl4a_api.AclDisconnected(
+                  address=self.ref.address,
+                  transport=android_constants.Transport.LE,
+              ),
+          )
+      except (core.BaseBumbleError, AssertionError):
+        self.logger.exception("Failed to make LE connection")
+      finally:
+        await performance_tool.cleanup_connections(self.dut, self.ref)
+    self.record_sponge_data(
+        repeat_times=_DEFAULT_REPEAT_TIMES, latency_list=latency_list
+    )
 
 
 if __name__ == "__main__":

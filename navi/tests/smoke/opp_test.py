@@ -68,6 +68,7 @@ class OppTest(navi_test_base.TwoDevicesTestBase):
           'com.google.android.apps.internal.betterbug',
       ])
 
+    # TODO: Wait for scrcpy fixed.
     # Stay awake during the test.
     self.dut.shell('svc power stayon true')
     # Dismiss the keyguard.
@@ -78,7 +79,8 @@ class OppTest(navi_test_base.TwoDevicesTestBase):
   @retry.retry_on_exception()
   async def _setup_paired_devices(self) -> None:
     # Reset devices.
-    self.dut.bt.enable()
+    self.assertTrue(self.dut.bt.enable())
+    self.dut.bt.waitForAdapterState(android_constants.AdapterState.ON)
     self.dut.bt.factoryReset()
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):
       await self.ref.reset()
@@ -114,20 +116,14 @@ class OppTest(navi_test_base.TwoDevicesTestBase):
     # Stop staying awake during the test.
     self.dut.shell('svc power stayon false')
 
-    if self.dut.device.services.has_service_by_name(_VIDEO_SERVICE_NAME):
-      self.dut.device.services.unregister(_VIDEO_SERVICE_NAME)
-
   @override
   @retry.retry_on_exception()
   async def async_setup_test(self) -> None:
     # Restart Bluetooth on DUT to clear any stale state.
-    self.dut.bt.disable()
-    self.dut.bt.enable()
-
-  @override
-  async def async_teardown_test(self) -> None:
-    await super().async_teardown_test()
-    self.dut.device.services.create_output_excerpts_all(self.current_test_info)
+    self.assertTrue(self.dut.bt.disable())
+    self.dut.bt.waitForAdapterState(android_constants.AdapterState.OFF)
+    self.assertTrue(self.dut.bt.enable())
+    self.dut.bt.waitForAdapterState(android_constants.AdapterState.ON)
 
   async def _make_opp_client_from_ref(self) -> opp.Client:
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):

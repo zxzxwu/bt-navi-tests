@@ -189,6 +189,18 @@ class BondState(enum.IntEnum):
   BONDED = 12
 
 
+class AdapterState(enum.IntEnum):
+  """android.bluetooth.BluetoothAdapter.STATE_*."""
+
+  OFF = 10
+  TURNING_ON = 11
+  ON = 12
+  TURNING_OFF = 13
+  BLE_TURNING_ON = 14
+  BLE_ON = 15
+  BLE_TURNING_OFF = 16
+
+
 class A2dpState(enum.IntEnum):
   """android.bluetooth.BluetoothA2dp.STATE_*."""
 

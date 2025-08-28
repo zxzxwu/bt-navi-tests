@@ -27,6 +27,7 @@ import wave
 from bumble import core
 from bumble import device
 from bumble import hci
+from bumble import utils
 from bumble.profiles import ascs
 from bumble.profiles import bap
 from bumble.profiles import gmap
@@ -254,27 +255,32 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
         self.dut.getprop(_AndroidProperty.CCP_SERVER_ENABLED) == "true"
     )
 
-    # TODO: Remove this when Bumble is fixed and synced.
-    origin_on_enable = ascs.AseStateMachine.on_enable
-
-    def on_enable(
-        ase: ascs.AseStateMachine, metadata: bytes
+    # TODO: Remove this once the bug is fixed in Bumble.
+    def on_release(
+        ase: ascs.AseStateMachine,
     ) -> tuple[ascs.AseResponseCode, ascs.AseReasonCode]:
-      res = origin_on_enable(ase, metadata)
-      # CIS could be established before enable.
-      if cis_link := next(
-          (
-              cis_link
-              for cis_link in ase.service.device.cis_links.values()
-              if cis_link.cig_id == ase.cig_id and cis_link.cis_id == ase.cis_id
-          ),
-          None,
-      ):
-        ase.on_cis_establishment(cis_link)
-      return res
+      if ase.state == ascs.AseStateMachine.State.IDLE:
+        return (
+            ascs.AseResponseCode.INVALID_ASE_STATE_MACHINE_TRANSITION,
+            ascs.AseReasonCode.NONE,
+        )
+      # ASE state cannot be changed to IDLE directly.
+      ase.state = ase.State.RELEASING
+      utils.cancel_on_event(
+          ase.service.device,
+          "flush",
+          ase.service.device.notify_subscribers(ase, ase.value),
+      )
+      ase.state = ase.State.IDLE
+
+      if ase.cis_link:
+        ase.cis_link.acl_connection.cancel_on_disconnection(
+            ase.cis_link.remove_data_path([ase.cis_link.Direction(ase.role)])
+        )
+      return (ascs.AseResponseCode.SUCCESS, ascs.AseReasonCode.NONE)
 
     self.test_class_context.enter_context(
-        mock.patch.object(ascs.AseStateMachine, "on_enable", new=on_enable)
+        mock.patch.object(ascs.AseStateMachine, "on_release", on_release)
     )
 
   @override
