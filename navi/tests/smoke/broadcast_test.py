@@ -144,9 +144,6 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
     if not self._broadcast_enabled and not self._bass_enabled:
       raise signals.TestAbortClass("Broadcast source and BASS are not enabled.")
 
-    async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECEONDS):
-      await self.ref.open()
-
     if not self.ref.device.supports_le_features(
         hci.LeFeatureMask.PERIODIC_ADVERTISING_SYNC_TRANSFER_RECIPIENT
         | hci.LeFeatureMask.PERIODIC_ADVERTISING_SYNC_TRANSFER_SENDER
@@ -220,7 +217,7 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
     )
 
     basic_audio_announcements = asyncio.Queue[bap.BasicAudioAnnouncement]()
-    big_info_advertisements = asyncio.Queue[device.BIGInfoAdvertisement]()
+    big_info_advertisements = asyncio.Queue[device.BigInfoAdvertisement]()
 
     def on_periodic_advertisement(
         advertisement: device.PeriodicAdvertisement,
@@ -240,7 +237,7 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
           break
 
     def on_biginfo_advertisement(
-        advertisement: device.BIGInfoAdvertisement,
+        advertisement: device.BigInfoAdvertisement,
     ) -> None:
       big_info_advertisements.put_nowait(advertisement)
 
@@ -654,7 +651,7 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
           break
 
     pa_sync = self.ref.device.periodic_advertising_syncs[0]
-    biginfo_advertisements = asyncio.Queue[device.BIGInfoAdvertisement]()
+    biginfo_advertisements = asyncio.Queue[device.BigInfoAdvertisement]()
     pa_sync.on(
         pa_sync.EVENT_BIGINFO_ADVERTISEMENT, biginfo_advertisements.put_nowait
     )
@@ -663,8 +660,12 @@ class BroadcastTest(navi_test_base.TwoDevicesTestBase):
       self.logger.info("[REF] Wait for BIG info advertisement")
       biginfo_advertisement = await biginfo_advertisements.get()
 
-    encryped = bool(broadcast_code)
-    self.assertEqual(biginfo_advertisement.encrypted, encryped)
+    encryped = (
+        device.BigInfoAdvertisement.Encryption.ENCRYPTED
+        if broadcast_code
+        else device.BigInfoAdvertisement.Encryption.UNENCRYPTED
+    )
+    self.assertEqual(biginfo_advertisement.encryption, encryped)
 
     receiver_state.pa_sync_state = (
         bass.BroadcastReceiveState.PeriodicAdvertisingSyncState.SYNCHRONIZED_TO_PA

@@ -15,8 +15,7 @@
 import asyncio
 import decimal
 import enum
-import statistics
-from typing import TypeAlias, Iterable
+from typing import Iterable, TypeAlias
 
 from bumble import avdtp
 from bumble import avrcp
@@ -27,6 +26,7 @@ from typing_extensions import override
 from navi.bumble_ext import a2dp as a2dp_ext
 from navi.tests import navi_test_base
 from navi.tests.benchmark import performance_tool
+from navi.tests.benchmark import test_base
 from navi.utils import android_constants
 from navi.utils import audio
 from navi.utils import bl4a_api
@@ -92,7 +92,7 @@ class AvrcpDelegate(avrcp.Delegate):
       self.condition.notify_all()
 
 
-class A2dpTest(navi_test_base.TwoDevicesTestBase):
+class A2dpTest(test_base.PerformanceTestBase):
   def _setup_a2dp_device(
       self, codecs: list[_A2dpCodec]
   ) -> tuple[avdtp.Listener, avrcp.Protocol]:
@@ -196,7 +196,6 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
       4. Terminate the connection.
       5. Repeat step 3-4.
     """
-    success_count = 0
     latency_list = list[float]()
     await self.pair_and_connect()
     await performance_tool.terminate_connection_from_ref(self.dut, self.ref)
@@ -212,40 +211,15 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
                 timeout=_DEFAULT_TIMEOUT_SECONDS,
             )
           latency_seconds = stop_watch.elapsed_time.total_seconds()
-        self.logger.info(
-            "Success connection in %.2f seconds", latency_seconds
+        self.success_attempt_record(
+            test_round=i + 1, latency=latency_seconds, latency_list=latency_list
         )
-        self.logger.info("Test %d Success", i + 1)
-        latency_list.append(latency_seconds)
-        success_count += 1
       except (core.BaseBumbleError, AssertionError):
         self.logger.exception("Failed to make A2DP connection")
       finally:
         await performance_tool.terminate_connection_from_ref(self.dut, self.ref)
-    self.logger.info(
-        "[success rate] Passes: %d / Attempts: %d",
-        success_count,
-        _DEFAULT_REPEAT_TIMES,
-    )
-    self.logger.info(
-        "[connection time] avg: %.2f, min: %.2f, max: %.2f, stdev: %.2f",
-        statistics.mean(latency_list),
-        min(latency_list),
-        max(latency_list),
-        statistics.stdev(latency_list),
-    )
-    self.record_data(
-        navi_test_base.RecordData(
-            test_name=self.current_test_info.name,
-            properties={
-                "passes": success_count,
-                "attempts": _DEFAULT_REPEAT_TIMES,
-                "avg_latency": statistics.mean(latency_list),
-                "min_latency": min(latency_list),
-                "max_latency": max(latency_list),
-                "stdev_latency": statistics.stdev(latency_list),
-            },
-        )
+    self.record_sponge_data(
+        repeat_times=_DEFAULT_REPEAT_TIMES, latency_list=latency_list
     )
 
   @navi_test_base.named_parameterized(
@@ -264,7 +238,6 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
     Args:
       avrcp_enabled: Enable AVRCP during the test.
     """
-    success_count = 0
     latency_list = list[float]()
     ref_avdtp_listener = a2dp_ext.setup_sink_server(
         self.ref.device,
@@ -333,40 +306,17 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
                   await ref_avrcp_protocol.connect(ref_acl)
                 self.logger.info("[REF] AVRCP connected.")
           latency_seconds = stop_watch.elapsed_time.total_seconds()
-          self.logger.info(
-              "Success connection in %.2f seconds", latency_seconds
+          self.success_attempt_record(
+              test_round=i + 1,
+              latency=latency_seconds,
+              latency_list=latency_list,
           )
-          self.logger.info("Test %d Success", i + 1)
-          latency_list.append(latency_seconds)
-        success_count += 1
       except (core.BaseBumbleError, AssertionError):
         self.logger.exception("Failed to make A2DP connection")
       finally:
         await performance_tool.terminate_connection_from_ref(self.dut, self.ref)
-    self.logger.info(
-        "[success rate] Passes: %d / Attempts: %d",
-        success_count,
-        _DEFAULT_REPEAT_TIMES,
-    )
-    self.logger.info(
-        "[connection time] avg: %.2f, min: %.2f, max: %.2f, stdev: %.2f",
-        statistics.mean(latency_list),
-        min(latency_list),
-        max(latency_list),
-        statistics.stdev(latency_list),
-    )
-    self.record_data(
-        navi_test_base.RecordData(
-            test_name=self.current_test_info.name,
-            properties={
-                "passes": success_count,
-                "attempts": _DEFAULT_REPEAT_TIMES,
-                "avg_latency": statistics.mean(latency_list),
-                "min_latency": min(latency_list),
-                "max_latency": max(latency_list),
-                "stdev_latency": statistics.stdev(latency_list),
-            },
-        )
+    self.record_sponge_data(
+        repeat_times=_DEFAULT_REPEAT_TIMES, latency_list=latency_list
     )
 
   async def wait_for_a2dp_status(
@@ -431,7 +381,6 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
 
     # If there is a playback, wait until it ends.
     await self.wait_for_a2dp_status(ref_sink, _A2dpStreamState.STOP)
-    success_count = 0
     latency_list = list[float]()
     for i in range(_DEFAULT_REPEAT_TIMES):
       try:
@@ -463,39 +412,18 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
           # Dominant frequency is not accurate on emulator.
           if not self.dut.device.is_emulator:
             self.assertAlmostEqual(dominant_frequency, 1000, delta=10)
-        self.logger.info("Success stream in %.2f seconds", latency_seconds)
-        self.logger.info("Test %d Success", i + 1)
-        latency_list.append(latency_seconds)
-        success_count += 1
+        self.success_attempt_record(
+            test_round=i + 1,
+            latency=latency_seconds,
+            latency_list=latency_list,
+        )
       except (core.BaseBumbleError, AssertionError):
         self.logger.exception("Failed to stream")
       finally:
         self.dut.bt.audioPause()
         await self.wait_for_a2dp_status(ref_sink, _A2dpStreamState.STOP)
-    self.logger.info(
-        "[success rate] Passes: %d / Attempts: %d",
-        success_count,
-        _DEFAULT_REPEAT_TIMES,
-    )
-    self.logger.info(
-        "[stream time] avg: %.2f, min: %.2f, max: %.2f, stdev: %.2f",
-        statistics.mean(latency_list),
-        min(latency_list),
-        max(latency_list),
-        statistics.stdev(latency_list),
-    )
-    self.record_data(
-        navi_test_base.RecordData(
-            test_name=self.current_test_info.name,
-            properties={
-                "passes": success_count,
-                "attempts": _DEFAULT_REPEAT_TIMES,
-                "avg_latency": statistics.mean(latency_list),
-                "min_latency": min(latency_list),
-                "max_latency": max(latency_list),
-                "stdev_latency": statistics.stdev(latency_list),
-            },
-        )
+    self.record_sponge_data(
+        repeat_times=_DEFAULT_REPEAT_TIMES, latency_list=latency_list
     )
 
   async def test_set_absolute_volume(self) -> None:
@@ -540,7 +468,6 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
     # DUT's VCS client might not be stable at the beginning. If we set volume
     # immediately, the volume might not be set correctly.
     await asyncio.sleep(_PREPARE_TIME_SECONDS)
-    success_count = 0
     latency_list = list[float]()
     for i in range(_DEFAULT_REPEAT_TIMES):
       try:
@@ -576,38 +503,13 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
                 lambda: ref_avrcp_delegator.volume == ref_expected_volume  # pylint: disable=cell-var-from-loop
             )
         latency_seconds = stop_watch.elapsed_time.total_seconds()
-        self.logger.info(
-            "Success set volume in %.2f seconds", latency_seconds
+        self.success_attempt_record(
+            test_round=i + 1, latency=latency_seconds, latency_list=latency_list
         )
-        self.logger.info("Test %d Success", i + 1)
-        latency_list.append(latency_seconds)
-        success_count += 1
       except (core.BaseBumbleError, AssertionError):
         self.logger.exception("Failed to set volume")
-    self.logger.info(
-        "[success rate] Passes: %d / Attempts: %d",
-        success_count,
-        _DEFAULT_REPEAT_TIMES,
-    )
-    self.logger.info(
-        "[volume change time] avg: %.2f, min: %.2f, max: %.2f, stdev: %.2f",
-        statistics.mean(latency_list),
-        min(latency_list),
-        max(latency_list),
-        statistics.stdev(latency_list),
-    )
-    self.record_data(
-        navi_test_base.RecordData(
-            test_name=self.current_test_info.name,
-            properties={
-                "passes": success_count,
-                "attempts": _DEFAULT_REPEAT_TIMES,
-                "avg_latency": statistics.mean(latency_list),
-                "min_latency": min(latency_list),
-                "max_latency": max(latency_list),
-                "stdev_latency": statistics.stdev(latency_list),
-            },
-        )
+    self.record_sponge_data(
+        repeat_times=_DEFAULT_REPEAT_TIMES, latency_list=latency_list
     )
 
 

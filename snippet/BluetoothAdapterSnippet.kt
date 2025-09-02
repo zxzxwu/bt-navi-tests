@@ -55,7 +55,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.timeout
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -130,40 +129,27 @@ class BluetoothAdapterSnippet : Snippet {
     result
   }
 
-  /** Enables Bluetooth, waits for the enabled state and returns the operation result. */
+  /** Enables Bluetooth and returns the operation result. */
   @Suppress("DEPRECATION")
   @Rpc(description = "Enable Bluetooth")
-  fun enable(): Boolean = runBlocking {
-    if (bluetoothAdapter.enable()) {
-      // Wait for Bluetooth on
-      adapterState.timeout(BLUETOOTH_ON_OFF_TIMEOUT).firstOrNull { it == BluetoothAdapter.STATE_ON }
-        ?: throw RuntimeException(
-          "Bluetooth isn't turned on after ${BLUETOOTH_ON_OFF_TIMEOUT}, " +
-            "final state=${BluetoothAdapter.nameForState(adapterState.value)}"
-        )
-      true
-    } else {
-      false
-    }
-  }
+  fun enable(): Boolean = bluetoothAdapter.enable()
 
-  /** Disables Bluetooth, waits for the disabled state and returns the operation result. */
-  @Suppress("DEPRECATION")
-  @Rpc(description = "Disable Bluetooth")
-  fun disable(): Boolean = runBlocking {
-    if (bluetoothAdapter.disable()) {
-      // Wait for Bluetooth off
-      adapterState.timeout(BLUETOOTH_ON_OFF_TIMEOUT).firstOrNull {
-        it == BluetoothAdapter.STATE_OFF
+  /** Disables Bluetooth and returns the operation result. */
+  @Rpc(description = "Disable Bluetooth") fun disable(): Boolean = bluetoothAdapter.disable(true)
+
+  @Rpc(description = "Wait for Bluetooth adapter state")
+  fun waitForAdapterState(state: Int) = runBlocking {
+    adapterState
+      .timeout(BLUETOOTH_ON_OFF_TIMEOUT)
+      .catch { exception ->
+        if (exception is TimeoutCancellationException) {
+          throw RuntimeException(
+            "Bluetooth isn't at state ${state} after ${BLUETOOTH_ON_OFF_TIMEOUT}, " +
+              "final state=${BluetoothAdapter.nameForState(adapterState.value)}"
+          )
+        }
       }
-        ?: throw RuntimeException(
-          "Bluetooth isn't turned off after ${BLUETOOTH_ON_OFF_TIMEOUT}, " +
-            "final state=${BluetoothAdapter.nameForState(adapterState.value)}"
-        )
-      true
-    } else {
-      false
-    }
+      .first { it == state }
   }
 
   /** Creates a [BroadcastReceiver] which redirects intents to the event queue of [callbackId]. */
@@ -613,6 +599,11 @@ class BluetoothAdapterSnippet : Snippet {
     bqrCallbacks.remove(callbackId)?.let {
       bluetoothAdapter.unregisterBluetoothQualityReportReadyCallback(it)
     }
+  }
+
+  @Rpc(description = "Get max connected audio devices")
+  fun maxConnectedAudioDevices(): Int {
+    return bluetoothAdapter.getMaxConnectedAudioDevices()
   }
 
   companion object {

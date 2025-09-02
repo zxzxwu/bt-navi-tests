@@ -338,7 +338,6 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
         address=self.ref.address,
         secure=secure_connection,
         psm=ref_l2cap_server.psm,
-        transport=android_constants.Transport.LE,
         address_type=android_constants.AddressTypeStatus.PUBLIC,
     )
 

@@ -1670,7 +1670,6 @@ class L2capChannel:
       address: str,
       secure: bool,
       psm: int,
-      transport: int,
       address_type: int | None = None,
       retry_count: int = _DEFAULT_RETRY_COUNT,
   ) -> Self:
@@ -1681,7 +1680,6 @@ class L2capChannel:
       address: Address of target device.
       secure: Whether encryption is required.
       psm: Channel number of the l2cap channel.
-      transport: Transport to use (Classic or LE).
       address_type: Address type of target device (if LE transport is used).
       retry_count: Allowed retry count of connect attempts.
 
@@ -1703,7 +1701,6 @@ class L2capChannel:
             address,
             secure,
             psm,
-            transport,
             address_type,
         )
         return cls(snippet=snippet, cookie=cookie)
@@ -1758,7 +1755,6 @@ class L2capServer:
       cls: Type[Self],
       snippet: snippet_stub.BluetoothSnippet,
       secure: bool,
-      transport: int,
       psm: int = AUTO_ALLOCATE_PSM,
   ) -> Self:
     """Opens an L2CAP server.
@@ -1766,15 +1762,12 @@ class L2capServer:
     Args:
       snippet: Snippet client instance.
       secure: Whether encryption is required.
-      transport: Transport (LE or Classic) of L2CAP.
       psm: L2CAP channel number.
 
     Returns:
       Created L2CAP server wrapper.
     """
-    return cls(
-        snippet=snippet, psm=snippet.l2capOpenServer(secure, transport, psm)
-    )
+    return cls(snippet=snippet, psm=snippet.l2capOpenServer(secure, psm))
 
   def close(self) -> None:
     """Closes the L2CAP server."""
@@ -1799,7 +1792,7 @@ class RfcommChannel:
       snippet: snippet_stub.BluetoothSnippet,
       address: str,
       secure: bool,
-      channel_or_uuid: int | str,
+      uuid: str,
       retry_count: int = _DEFAULT_RETRY_COUNT,
   ) -> Self:
     """Connects an RFCOMM channel.
@@ -1808,7 +1801,7 @@ class RfcommChannel:
       snippet: snippet client instance.
       address: address of target device.
       secure: whether encryption is required.
-      channel_or_uuid: channel number or UUID of the RFCOMM channel.
+      uuid: UUID of the RFCOMM channel.
       retry_count: allowed retry count of connect attempts.
 
     Returns:
@@ -1817,24 +1810,17 @@ class RfcommChannel:
     Raises:
       ConnectionError: RFCOMM is not connected after allowed retry counts.
     """
-    if isinstance(channel_or_uuid, int):
-      method = lambda: snippet.rfcommConnectWithChannel(
-          address, secure, channel_or_uuid
-      )
-    elif isinstance(channel_or_uuid, str):
-      method = lambda: snippet.rfcommConnectWithUuid(
-          address, secure, channel_or_uuid
-      )
-    else:
-      raise ValueError(f'Unsupported channel_or_uuid: {channel_or_uuid}')
-
     @retry.retry_on_exception(
         initial_delay_sec=_DEFAULT_RETRY_DELAY_SECONDS,
         num_retries=retry_count,
     )
     async def inner() -> Self:
       try:
-        cookie = await asyncio.to_thread(method)
+        cookie = await asyncio.to_thread(
+            lambda: snippet.rfcommConnectWithUuid(
+                address, secure, uuid
+            )
+        )
         return cls(snippet=snippet, cookie=cookie)
       except mobly.snippet.errors.ApiError as e:
         raise errors.ConnectionError('Unable to connect RFCOMM') from e
@@ -1847,7 +1833,7 @@ class RfcommChannel:
       snippet: snippet_stub.BluetoothSnippet,
       address: str,
       secure: bool,
-      channel_or_uuid: int | str,
+      channel_or_uuid: str,
   ) -> Coroutine[None, None, Self]:
     """Connects an RFCOMM channel asynchronously.
 
@@ -2547,27 +2533,24 @@ class SnippetWrapper:
   def create_l2cap_server(
       self,
       secure: bool,
-      transport: int,
       psm: int = L2capServer.AUTO_ALLOCATE_PSM,
   ) -> L2capServer:
     """Creates an L2CAP server.
 
     Args:
       secure: Whether encryption is required.
-      transport: Transport (LE or Classic) of L2CAP.
       psm: L2CAP channel number.
 
     Returns:
       The L2CAP server control block.
     """
-    return L2capServer.create(self.snippet, secure, transport, psm)
+    return L2capServer.create(self.snippet, secure, psm)
 
   async def create_l2cap_channel(
       self,
       address: str,
       secure: bool,
       psm: int,
-      transport: int,
       address_type: int | None = None,
       retry_count: int = _DEFAULT_RETRY_COUNT,
   ) -> L2capChannel:
@@ -2577,8 +2560,7 @@ class SnippetWrapper:
       address: Address of target device.
       secure: Whether encryption is required.
       psm: L2CAP channel number.
-      transport: Transport (LE or Classic) of L2CAP.
-      address_type: Address type of target device (if LE transport is used).
+      address_type: Address type of target device.
       retry_count: Allowed retry count of connect attempts.
 
     Returns:
@@ -2589,7 +2571,6 @@ class SnippetWrapper:
         address,
         secure,
         psm,
-        transport,
         address_type,
         retry_count,
     )
@@ -2610,7 +2591,7 @@ class SnippetWrapper:
       self,
       address: str,
       secure: bool,
-      channel_or_uuid: int | str,
+      uuid: str,
       retry_count: int = _DEFAULT_RETRY_COUNT,
   ) -> RfcommChannel:
     """Creates an RFCOMM channel.
@@ -2618,34 +2599,34 @@ class SnippetWrapper:
     Args:
       address: Address of target device.
       secure: Whether encryption is required.
-      channel_or_uuid: Channel number or UUID of the RFCOMM service.
+      uuid: UUID of the RFCOMM service.
       retry_count: Allowed retry count of connect attempts.
 
     Returns:
       The RFCOMM channel control block.
     """
     return await RfcommChannel.connect(
-        self.snippet, address, secure, channel_or_uuid, retry_count
+        self.snippet, address, secure, uuid, retry_count
     )
 
   def create_rfcomm_channel_async(
       self,
       address: str,
       secure: bool,
-      channel_or_uuid: int | str,
+      uuid: str,
   ) -> Coroutine[None, None, RfcommChannel]:
     """Creates an RFCOMM channel.
 
     Args:
       address: Address of target device.
       secure: Whether encryption is required.
-      channel_or_uuid: Channel number or UUID of the RFCOMM service.
+      uuid: UUID of the RFCOMM service.
 
     Returns:
       The RFCOMM channel control block.
     """
     return RfcommChannel.connect_async(
-        self.snippet, address, secure, channel_or_uuid
+        self.snippet, address, secure, uuid
     )
 
   async def start_legacy_advertiser(

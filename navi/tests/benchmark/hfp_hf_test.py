@@ -14,8 +14,6 @@
 
 """Tests related to Bluetooth HFP(Hands-Free Profile) HF role on Pixel."""
 
-import statistics
-
 from bumble import core
 from bumble import hci
 from bumble import hfp
@@ -24,8 +22,8 @@ from mobly import test_runner
 from mobly import signals
 from typing_extensions import override
 
-from navi.tests import navi_test_base
 from navi.tests.benchmark import performance_tool
+from navi.tests.benchmark import test_base
 from navi.utils import android_constants
 from navi.utils import bl4a_api
 
@@ -55,7 +53,7 @@ _DEFAULT_AG_CONFIGURATION = hfp.AgConfiguration(
 )
 
 
-class HfpHfTest(navi_test_base.TwoDevicesTestBase):
+class HfpHfTest(test_base.PerformanceTestBase):
 
   @override
   async def async_setup_class(self) -> None:
@@ -146,7 +144,6 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
       5. Disconnect from DUT.
       6. Wait HFP disconnected on DUT.
     """
-    success_count = 0
     latency_list = list[float]()
     await self.pair_and_connect()
     await performance_tool.terminate_connection_from_ref(self.dut, self.ref)
@@ -160,40 +157,17 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
             await self._wait_for_hfp_state(dut_cb, _HfpState.CONNECTED)
 
           latency_seconds = stop_watch.elapsed_time.total_seconds()
-          self.logger.info(
-              "Success connection in %.2f seconds", latency_seconds
+          self.success_attempt_record(
+              test_round=i + 1,
+              latency=latency_seconds,
+              latency_list=latency_list,
           )
-          self.logger.info("Test%d Success", i + 1)
-          latency_list.append(latency_seconds)
-        success_count += 1
       except (core.BaseBumbleError, AssertionError):
         self.logger.exception("Failed to make HFP connection")
       finally:
         await performance_tool.terminate_connection_from_ref(self.dut, self.ref)
-    self.logger.info(
-        "[success rate] Passes: %d / Attempts: %d",
-        success_count,
-        _DEFAULT_REPEAT_TIMES,
-    )
-    self.logger.info(
-        "[connection time] avg: %.2f, min: %.2f, max: %.2f, stdev: %.2f",
-        statistics.mean(latency_list),
-        min(latency_list),
-        max(latency_list),
-        statistics.stdev(latency_list),
-    )
-    self.record_data(
-        navi_test_base.RecordData(
-            test_name=self.current_test_info.name,
-            properties={
-                "passes": success_count,
-                "attempts": _DEFAULT_REPEAT_TIMES,
-                "avg_latency": statistics.mean(latency_list),
-                "min_latency": min(latency_list),
-                "max_latency": max(latency_list),
-                "stdev_latency": statistics.stdev(latency_list),
-            },
-        )
+    self.record_sponge_data(
+        repeat_times=_DEFAULT_REPEAT_TIMES, latency_list=latency_list
     )
 
   async def test_paired_connect_incoming(self) -> None:
@@ -207,7 +181,6 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
       5. Disconnect from REF.
       6. Wait HFP disconnected on DUT.
     """
-    success_count = 0
     latency_list = list[float]()
     await self.pair_and_connect()
     await performance_tool.terminate_connection_from_ref(self.dut, self.ref)
@@ -220,40 +193,17 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
             self.logger.info("[DUT] Wait for HFP connected.")
             await self._wait_for_hfp_state(dut_cb, _HfpState.CONNECTED)
           latency_seconds = stop_watch.elapsed_time.total_seconds()
-          self.logger.info(
-              "Success connection in %.2f seconds", latency_seconds
+          self.success_attempt_record(
+              test_round=i + 1,
+              latency=latency_seconds,
+              latency_list=latency_list,
           )
-          self.logger.info("Test%d Success", i + 1)
-          latency_list.append(latency_seconds)
-        success_count += 1
       except (core.BaseBumbleError, AssertionError):
         self.logger.exception("Failed to make HFP connection")
       finally:
         await performance_tool.terminate_connection_from_ref(self.dut, self.ref)
-    self.logger.info(
-        "[success rate] Passes: %d / Attempts: %d",
-        success_count,
-        _DEFAULT_REPEAT_TIMES,
-    )
-    self.logger.info(
-        "[connection time] avg: %.2f, min: %.2f, max: %.2f, stdev: %.2f",
-        statistics.mean(latency_list),
-        min(latency_list),
-        max(latency_list),
-        statistics.stdev(latency_list),
-    )
-    self.record_data(
-        navi_test_base.RecordData(
-            test_name=self.current_test_info.name,
-            properties={
-                "passes": success_count,
-                "attempts": _DEFAULT_REPEAT_TIMES,
-                "avg_latency": statistics.mean(latency_list),
-                "min_latency": min(latency_list),
-                "max_latency": max(latency_list),
-                "stdev_latency": statistics.stdev(latency_list),
-            },
-        )
+    self.record_sponge_data(
+        repeat_times=_DEFAULT_REPEAT_TIMES, latency_list=latency_list
     )
 
 

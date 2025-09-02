@@ -12,10 +12,11 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-"""Tests when remote device supports both HFP and A2DP."""
+"""Tests switching between multiple devices."""
 
 import asyncio
 from typing import TypeAlias
+from unittest import mock
 
 from bumble import device
 from bumble import hci
@@ -54,24 +55,23 @@ _DEFAULT_HFP_CONFIGURATION = hfp.HfConfiguration(
 )
 
 
-class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
+class CoexTest(navi_test_base.MultiDevicesTestBase):
   ref_supports_lc3: bool
 
   @override
   async def async_setup_class(self) -> None:
     await super().async_setup_class()
-    # Make sure Bumble is on.
-    await self.ref.open()
-    response = await self.ref.device.send_command(
-        hci.HCI_Read_Local_Supported_Codecs_Command(),
-        check_result=True,
-    )
-    supported_codecs = list(
-        hci.CodecID(codec)
-        for codec in response.return_parameters.standard_codec_ids
-    )
-    self.logger.info("[REF] Supported codecs: %s", supported_codecs)
-    self.ref_supports_lc3 = hci.CodecID.LC3 in supported_codecs
+    for ref in self.refs:
+      response = await ref.device.send_command(
+          hci.HCI_Read_Local_Supported_Codecs_Command(),
+          check_result=True,
+      )
+      supported_codecs = list(
+          hci.CodecID(codec)
+          for codec in response.return_parameters.standard_codec_ids
+      )
+      self.logger.info("[REF] Supported codecs: %s", supported_codecs)
+      self.ref_supports_lc3 = hci.CodecID.LC3 in supported_codecs
 
   @override
   async def async_teardown_test(self) -> None:
@@ -86,21 +86,22 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
       a2dp_codecs: list[a2dp_ext.A2dpCodec],
   ) -> None:
     """Setup HFP and A2DP servicer on the REF device."""
-    hfp_ext.HfProtocol.setup_server(
-        self.ref.device,
-        sdp_handle=_HFP_SDP_HANDLE,
-        configuration=hfp_configuration,
-    )
-    a2dp_ext.setup_sink_server(
-        self.ref.device,
-        [codec.get_default_capabilities() for codec in a2dp_codecs],
-        _A2DP_SERVICE_RECORD_HANDLE,
-    )
-    a2dp_ext.setup_avrcp_server(
-        self.ref.device,
-        avrcp_controller_handle=_AVRCP_CONTROLLER_RECORD_HANDLE,
-        avrcp_target_handle=_AVRCP_TARGET_RECORD_HANDLE,
-    )
+    for ref in self.refs:
+      hfp_ext.HfProtocol.setup_server(
+          ref.device,
+          sdp_handle=_HFP_SDP_HANDLE,
+          configuration=hfp_configuration,
+      )
+      a2dp_ext.setup_sink_server(
+          ref.device,
+          [codec.get_default_capabilities() for codec in a2dp_codecs],
+          _A2DP_SERVICE_RECORD_HANDLE,
+      )
+      a2dp_ext.setup_avrcp_server(
+          ref.device,
+          avrcp_controller_handle=_AVRCP_CONTROLLER_RECORD_HANDLE,
+          avrcp_target_handle=_AVRCP_TARGET_RECORD_HANDLE,
+      )
 
   async def test_pair_and_connect(self) -> None:
     """Tests HFP connection establishment right after a pairing session.
@@ -111,6 +112,7 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
       3. Wait HFP and A2DP connected on DUT.
       (Android should autoconnect HFP as AG)
     """
+    self.ref = self.refs[0]
     with (
         self.dut.bl4a.register_callback(_Module.A2DP) as dut_cb_a2dp,
         self.dut.bl4a.register_callback(_Module.HFP_AG) as dut_cb_hfp,
@@ -177,6 +179,7 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
       supported_audio_codecs: Audio codecs supported by REF device.
       handle_audio_focus: Whether to enable audio focus handling.
     """
+    self.ref = self.refs[0]
     if (
         _AudioCodec.LC3_SWB in supported_audio_codecs
         and not self.ref_supports_lc3
@@ -295,6 +298,100 @@ class ClassicHeadsetTest(navi_test_base.TwoDevicesTestBase):
       await dut_player_cb.wait_for_event(
           bl4a_api.PlayerIsPlayingChanged(is_playing=True),
       )
+
+  async def test_multidevice_hf_switch(self) -> None:
+    """Tests DUT switch active hfp devices.
+
+    Test steps:
+      1. Setup two HFP HF devices.
+      2. DUT pair with REF0.
+      3. DUT pair with REF1.
+      4. DUT make outgoing call.
+      5. DUT answer the call.
+      6. DUT switch active device to REF0.
+      7. DUT switch active device to REF1.
+    """
+    if self.dut.bt.maxConnectedAudioDevices() < 2:
+      self.skipTest("[DUT] Multi-device HF is not supported.")
+
+    with self.dut.bl4a.register_callback(bl4a_api.Module.HFP_AG) as dut_hfp_cb:
+      for i, ref in enumerate(self.refs):
+        self.logger.info("[REF%s] Setup HFP HF", i)
+        hfp_ext.HfProtocol.setup_server(
+            ref.device,
+            sdp_handle=_HFP_SDP_HANDLE,
+            configuration=_DEFAULT_HFP_CONFIGURATION,
+        )
+
+        await self.classic_connect_and_pair(ref)
+
+        self.logger.info("[DUT] Wait for HFP connected to REF%s", i)
+        await dut_hfp_cb.wait_for_event(
+            bl4a_api.ProfileActiveDeviceChanged(address=ref.address),
+        )
+
+    with (
+        self.dut.bl4a.register_callback(
+            bl4a_api.Module.TELECOM
+        ) as dut_telecom_cb,
+        self.dut.bl4a.make_phone_call(
+            _CALLER_NAME,
+            _CALLER_NUMBER,
+            constants.Direction.OUTGOING,
+        ) as call,
+    ):
+      self.logger.info("[DUT] Wait for call dialing.")
+      await dut_telecom_cb.wait_for_event(
+          bl4a_api.CallStateChanged(
+              handle=mock.ANY,
+              name=mock.ANY,
+              state=android_constants.CallState.DIALING,
+          ),
+      )
+
+      self.logger.info("[DUT] Answer call.")
+      call.answer()
+
+      self.logger.info("[DUT] Wait for call active.")
+      await dut_telecom_cb.wait_for_event(
+          bl4a_api.CallStateChanged(
+              handle=mock.ANY,
+              name=mock.ANY,
+              state=android_constants.CallState.ACTIVE,
+          ),
+      )
+
+      self.logger.info("[DUT] Start streaming.")
+      self.dut.bt.audioSetRepeat(android_constants.RepeatMode.ONE)
+      await asyncio.to_thread(self.dut.bt.audioPlaySine)
+
+      # The default route should be REF1.
+      for i, ref in enumerate(self.refs):
+        with self.dut.bl4a.register_callback(_Module.HFP_AG) as dut_hfp_cb:
+          self.assertNotEqual(
+              self.dut.bt.hfpAgGetAudioState(ref.address), _ScoState.CONNECTED,
+              f"SCO is already connected to REF{i}.",
+          )
+
+          self.logger.info("[DUT] Switch to REF%s", i)
+          self.dut.bt.setActiveDevice(
+              ref.address, android_constants.ActiveDeviceUse.PHONE_CALL,
+          )
+
+          self.logger.info("[DUT] Wait for HFP connected to REF%s", i)
+          await dut_hfp_cb.wait_for_event(
+              bl4a_api.ProfileActiveDeviceChanged(ref.address)
+          )
+
+          self.logger.info("[DUT] Wait for SCO connected to REF%s", i)
+          await dut_hfp_cb.wait_for_event(
+              event=_HfpAgAudioStateChange(
+                  address=ref.address, state=_ScoState.CONNECTED
+              ),
+          )
+
+      self.logger.info("[DUT] Terminate call.")
+      call.close()
 
 
 if __name__ == "__main__":
