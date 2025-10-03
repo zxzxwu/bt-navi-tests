@@ -86,7 +86,7 @@ def download_btsnoop(
         .splitlines()
     )
     for filename in files:
-      device_snoop_path = str(pathlib.Path(directory, filename))
+      device_snoop_path = pathlib.Path(directory, filename).as_posix()
       host_snoop_path = dest / f'{filename_prefix}_{filename}'
       device.adb.pull([device_snoop_path, str(host_snoop_path)])
 

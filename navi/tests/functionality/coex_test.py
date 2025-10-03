@@ -21,10 +21,13 @@ from unittest import mock
 from bumble import device
 from bumble import hci
 from bumble import hfp
+from bumble import rfcomm
+from bumble import smp
 from mobly import test_runner
 from typing_extensions import override
 
 from navi.bumble_ext import a2dp as a2dp_ext
+from navi.bumble_ext import avrcp as avrcp_ext
 from navi.bumble_ext import hfp as hfp_ext
 from navi.tests import navi_test_base
 from navi.utils import android_constants
@@ -44,10 +47,31 @@ _AudioCodec = hfp.AudioCodec
 _Module: TypeAlias = bl4a_api.Module
 _ScoState = android_constants.ScoState
 _HfpAgAudioStateChange = bl4a_api.HfpAgAudioStateChanged
+_CallState = android_constants.CallState
+_CallbackHandler = bl4a_api.CallbackHandler
 
-_DEFAULT_HFP_CONFIGURATION = hfp.HfConfiguration(
+_DEFAULT_HF_CONFIGURATION = hfp.HfConfiguration(
     supported_hf_features=[],
     supported_hf_indicators=[],
+    supported_audio_codecs=[
+        _AudioCodec.CVSD,
+        _AudioCodec.MSBC,
+    ],
+)
+
+_DEFAULT_AG_CONFIGURATION = hfp.AgConfiguration(
+    supported_ag_features=(hfp.AgFeature.ENHANCED_CALL_STATUS,),
+    supported_ag_indicators=([
+        hfp.AgIndicatorState.call(),
+        hfp.AgIndicatorState.callsetup(),
+        hfp.AgIndicatorState.service(),
+        hfp.AgIndicatorState.signal(),
+        hfp.AgIndicatorState.roam(),
+        hfp.AgIndicatorState.callheld(),
+        hfp.AgIndicatorState.battchg(),
+    ]),
+    supported_hf_indicators=[],
+    supported_ag_call_hold_operations=[],
     supported_audio_codecs=[
         _AudioCodec.CVSD,
         _AudioCodec.MSBC,
@@ -97,7 +121,7 @@ class CoexTest(navi_test_base.MultiDevicesTestBase):
           [codec.get_default_capabilities() for codec in a2dp_codecs],
           _A2DP_SERVICE_RECORD_HANDLE,
       )
-      a2dp_ext.setup_avrcp_server(
+      avrcp_ext.setup_server(
           ref.device,
           avrcp_controller_handle=_AVRCP_CONTROLLER_RECORD_HANDLE,
           avrcp_target_handle=_AVRCP_TARGET_RECORD_HANDLE,
@@ -118,7 +142,7 @@ class CoexTest(navi_test_base.MultiDevicesTestBase):
         self.dut.bl4a.register_callback(_Module.HFP_AG) as dut_cb_hfp,
     ):
       self._setup_headset_device(
-          hfp_configuration=_DEFAULT_HFP_CONFIGURATION,
+          hfp_configuration=_DEFAULT_HF_CONFIGURATION,
           a2dp_codecs=[a2dp_ext.A2dpCodec.SBC],
       )
       self.logger.info("[DUT] Connect and pair REF.")
@@ -314,18 +338,26 @@ class CoexTest(navi_test_base.MultiDevicesTestBase):
     if self.dut.bt.maxConnectedAudioDevices() < 2:
       self.skipTest("[DUT] Multi-device HF is not supported.")
 
-    with self.dut.bl4a.register_callback(bl4a_api.Module.HFP_AG) as dut_hfp_cb:
+    with self.dut.bl4a.register_callback(_Module.HFP_AG) as dut_hfp_cb:
       for i, ref in enumerate(self.refs):
-        self.logger.info("[REF%s] Setup HFP HF", i)
+        self.logger.info("[REF-%d] Setup HFP HF", i)
         hfp_ext.HfProtocol.setup_server(
             ref.device,
             sdp_handle=_HFP_SDP_HANDLE,
-            configuration=_DEFAULT_HFP_CONFIGURATION,
+            configuration=_DEFAULT_HF_CONFIGURATION,
+        )
+
+        # Disable CTKD to stop the DUT from connecting to REF on LE transport.
+        # Otherwise, the wait time for le connection on ref-0 will block the sdp
+        # on ref-1.
+        self.logger.info("[REF-%d] Disable CTKD.", i)
+        ref.device.l2cap_channel_manager.deregister_fixed_channel(
+            smp.SMP_BR_CID
         )
 
         await self.classic_connect_and_pair(ref)
 
-        self.logger.info("[DUT] Wait for HFP connected to REF%s", i)
+        self.logger.info("[DUT] Wait for HFP connected to REF-%d", i)
         await dut_hfp_cb.wait_for_event(
             bl4a_api.ProfileActiveDeviceChanged(address=ref.address),
         )
@@ -373,17 +405,17 @@ class CoexTest(navi_test_base.MultiDevicesTestBase):
               f"SCO is already connected to REF{i}.",
           )
 
-          self.logger.info("[DUT] Switch to REF%s", i)
+          self.logger.info("[DUT] Switch to REF-%d", i)
           self.dut.bt.setActiveDevice(
               ref.address, android_constants.ActiveDeviceUse.PHONE_CALL,
           )
 
-          self.logger.info("[DUT] Wait for HFP connected to REF%s", i)
+          self.logger.info("[DUT] Wait for HFP connected to REF-%d", i)
           await dut_hfp_cb.wait_for_event(
               bl4a_api.ProfileActiveDeviceChanged(ref.address)
           )
 
-          self.logger.info("[DUT] Wait for SCO connected to REF%s", i)
+          self.logger.info("[DUT] Wait for SCO connected to REF-%d", i)
           await dut_hfp_cb.wait_for_event(
               event=_HfpAgAudioStateChange(
                   address=ref.address, state=_ScoState.CONNECTED
@@ -393,6 +425,208 @@ class CoexTest(navi_test_base.MultiDevicesTestBase):
       self.logger.info("[DUT] Terminate call.")
       call.close()
 
+  async def test_multidevice_a2dp_switch(self) -> None:
+    """Tests DUT switch active a2dp devices.
+
+    Test steps:
+      1. Setup two A2DP devices.
+      2. DUT pair with REF0.
+      3. DUT pair with REF1.
+      4. DUT switch active device to REF0.
+      5. DUT switch active device to REF1.
+    """
+    if self.dut.bt.maxConnectedAudioDevices() < 2:
+      self.skipTest("[DUT] Multi-device A2DP is not supported.")
+
+    with self.dut.bl4a.register_callback(_Module.A2DP) as dut_a2dp_cb:
+      for i, ref in enumerate(self.refs):
+        self.logger.info("[REF-%d] Setup A2DP", i)
+        a2dp_ext.setup_sink_server(
+            ref.device,
+            [a2dp_ext.A2dpCodec.SBC.get_default_capabilities()],
+            _A2DP_SERVICE_RECORD_HANDLE,
+        )
+
+        # Disable CTKD to stop the DUT from connecting to REF on LE transport.
+        # Otherwise, the wait time for le connection on ref-0 will block the sdp
+        # on ref-1.
+        self.logger.info("[REF-%d] Disable CTKD.", i)
+        ref.device.l2cap_channel_manager.deregister_fixed_channel(
+            smp.SMP_BR_CID
+        )
+
+        await self.classic_connect_and_pair(ref)
+
+        self.logger.info("[DUT] Wait for A2DP connected to REF-%d", i)
+        await dut_a2dp_cb.wait_for_event(
+            bl4a_api.ProfileActiveDeviceChanged(address=ref.address),
+        )
+
+    with self.dut.bl4a.register_callback(_Module.A2DP) as dut_a2dp_cb:
+      self.logger.info("[DUT] Start playing music.")
+      self.dut.bt.audioSetRepeat(android_constants.RepeatMode.ONE)
+      await asyncio.to_thread(self.dut.bt.audioPlaySine)
+
+      # The default route should be REF-1.
+      for i, ref in enumerate(self.refs):
+        self.assertFalse(
+            self.dut.bt.isA2dpPlaying(ref.address),
+            f"A2DP is already playing on REF{i}.",
+        )
+
+        self.logger.info("[DUT] Switch to REF-%d", i)
+        self.dut.bt.setActiveDevice(
+            ref.address, android_constants.ActiveDeviceUse.AUDIO,
+        )
+
+        self.logger.info("[DUT] Wait for A2DP connected to REF-%d", i)
+        await dut_a2dp_cb.wait_for_event(
+            bl4a_api.ProfileActiveDeviceChanged(ref.address)
+        )
+
+        if not self.dut.bt.isA2dpPlaying(ref.address):
+          self.logger.info("[DUT] Wait for A2DP playing on REF-%d.", i)
+          await dut_a2dp_cb.wait_for_event(
+              bl4a_api.A2dpPlayingStateChanged(
+                  ref.address, android_constants.A2dpState.PLAYING
+              ),
+          )
+
+  async def test_multipoint_ringtone(self) -> None:
+    """Tests phone call, ringtone is played on both REF-HF and DUT.
+
+    Test steps:
+      1. Setup HFP HF on REF-HF.
+      2. Setup HFP AG on REF-AG.
+      3. Connect and pair DUT to REF-HF.
+      4. Connect and pair DUT to REF-AG.
+      5. Make a phone call from REF-AG.
+    """
+    if self.dut.getprop(android_constants.Property.HFP_HF_ENABLED) != "true":
+      self.skipTest("DUT does not have HFP HF enabled.")
+
+    if self.dut.getprop(android_constants.Property.HFP_AG_ENABLED) != "true":
+      self.skipTest("DUT does not have HFP AG enabled.")
+
+    ref_hf_protocol_queue = hfp_ext.HfProtocol.setup_server(
+        self.refs[0].device,
+        sdp_handle=_HFP_SDP_HANDLE,
+        configuration=_DEFAULT_HF_CONFIGURATION,
+    )
+
+    self.ref_ag_protocols = asyncio.Queue[hfp.AgProtocol]()
+
+    def on_dlc(dlc: rfcomm.DLC):
+      self.ref_ag_protocols.put_nowait(
+          hfp.AgProtocol(dlc, _DEFAULT_AG_CONFIGURATION)
+      )
+
+    self.refs[1].device.sdp_service_records = {
+        _HFP_SDP_HANDLE: hfp.make_ag_sdp_records(
+            service_record_handle=_HFP_SDP_HANDLE,
+            rfcomm_channel=rfcomm.Server(self.refs[1].device).listen(on_dlc),
+            configuration=_DEFAULT_AG_CONFIGURATION,
+        )
+    }
+
+    dut_ag_cb = self.dut.bl4a.register_callback(_Module.HFP_AG)
+    dut_hf_cb = self.dut.bl4a.register_callback(_Module.HFP_HF)
+    dut_telecom_cb = self.dut.bl4a.register_callback(_Module.TELECOM)
+    self.test_case_context.push(dut_ag_cb)
+    self.test_case_context.push(dut_hf_cb)
+    self.test_case_context.push(dut_telecom_cb)
+
+    await self.classic_connect_and_pair(self.refs[0])
+
+    self.logger.info("[DUT] Wait for HFP AG connected on REF-HF.")
+    await dut_ag_cb.wait_for_event(
+        bl4a_api.ProfileConnectionStateChanged(
+            address=self.refs[0].address,
+            state=android_constants.ConnectionState.CONNECTED,
+        ),
+    )
+
+    self.logger.info("[REF-HF] Wait for HF protocol connected.")
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      ref_hf_protocol = await ref_hf_protocol_queue.get()
+
+    ref_hf_ring_event = asyncio.Event()
+    ref_hf_protocol.on(
+        hfp.HfProtocol.EVENT_RING, ref_hf_ring_event.set
+    )
+
+    await self.classic_connect_and_pair(self.refs[1])
+
+    self.logger.info("[DUT] Wait for HFP HF connected on REF-AG.")
+    await dut_hf_cb.wait_for_event(
+        bl4a_api.ProfileConnectionStateChanged(
+            address=self.refs[1].address,
+            state=android_constants.ConnectionState.CONNECTED,
+        ),
+    )
+
+    self.logger.info("[REF-AG] Wait for AG protocol connected.")
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      ref_ag_protocol = await self.ref_ag_protocols.get()
+
+    self.logger.info("[REF-AG] Update call state.")
+    call_info = hfp.CallInfo(
+        index=1,
+        direction=hfp.CallInfoDirection.MOBILE_TERMINATED_CALL,
+        status=hfp.CallInfoStatus.INCOMING,
+        mode=hfp.CallInfoMode.VOICE,
+        multi_party=hfp.CallInfoMultiParty.NOT_IN_CONFERENCE,
+        number="+1234567890",
+    )
+    ref_ag_protocol.calls.append(call_info)
+    ref_ag_protocol.update_ag_indicator(
+        hfp.AgIndicator.CALL_SETUP,
+        hfp.CallSetupAgIndicator.INCOMING_CALL_PROCESS,
+    )
+
+    self.logger.info("[DUT] Wait for call ringing.")
+    await dut_telecom_cb.wait_for_event(
+        bl4a_api.CallStateChanged(
+            handle=mock.ANY,
+            name=mock.ANY,
+            state=_CallState.RINGING,
+        )
+    )
+
+    async with self.assert_not_timeout(
+        _DEFAULT_STEP_TIMEOUT_SECONDS,
+        msg="[REF-HF] Wait for ringtone.",
+    ):
+      await ref_hf_ring_event.wait()
+
+  async def test_multipoint_call(self) -> None:
+    """Tests phone call, SCO connection is only connected to REF-AG.
+
+    Test steps:
+      1. Setup HFP HF on REF-HF.
+      2. Setup HFP AG on REF-AG.
+      3. Connect and pair DUT to REF-HF.
+      4. Connect and pair DUT to REF-AG.
+      5. Make a phone call from REF-AG.
+      6. Answer the call on DUT.
+      7. Wait for SCO connected only on REF-AG.
+    """
+    await self.test_multipoint_ringtone()
+
+    sco_link_hf = asyncio.Queue[device.ScoLink]()
+    self.refs[0].device.on(
+        self.refs[0].device.EVENT_SCO_CONNECTION, sco_link_hf.put_nowait
+    )
+
+    self.logger.info("[DUT] Answer call.")
+    self.dut.shell("input keyevent KEYCODE_CALL")
+
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      self.logger.info("[REF-HF] Wait for SCO connected.")
+      await sco_link_hf.get()
+
+    self.logger.info("[REF-AG] Check SCO is not connected.")
+    self.assertEmpty(self.refs[1].device.sco_links)
 
 if __name__ == "__main__":
   test_runner.main()

@@ -235,7 +235,7 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
     if (
         self.dut.getprop(_AndroidProperty.LEAUDIO_BYPASS_ALLOW_LIST) != "true"
         and not self.dut.getprop(_AndroidProperty.LEAUDIO_ALLOW_LIST)
-        and self.dut.getprop("ro.hardware") != "cutf_cvm"
+        and self.dut.bt.getHardware() != "cutf_cvm"
     ):
       # Allow list will not be used in the test, but here we still check if the
       # allow list is empty to make sure DUT is ready to use LE Audio.
@@ -306,14 +306,14 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
 
   def _get_sampling_frequency(
       self, ase: ascs.AseStateMachine
-  ) -> bap.SamplingFrequency | None:
+  ) -> bap.SamplingFrequency:
     """Returns the sampling frequency of the ASE."""
     if isinstance(
         codec_config := ase.codec_specific_configuration,
         bap.CodecSpecificConfiguration,
-    ):
+    ) and codec_config.sampling_frequency is not None:
       return codec_config.sampling_frequency
-    return None
+    return bap.SamplingFrequency(0)
 
   @navi_test_base.named_parameterized(
       ("active", True),
@@ -442,9 +442,34 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
     """
     sink_ase = self.ref_ascs.ase_state_machines[_SINK_ASE_ID]
     source_ase = self.ref_ascs.ase_state_machines[_SOURCE_ASE_ID]
+    condition = asyncio.Condition()
+
+    @sink_ase.on(sink_ase.EVENT_STATE_CHANGE)
+    @source_ase.on(sink_ase.EVENT_STATE_CHANGE)
+    async def on_state_change() -> None:
+      async with condition:
+        condition.notify_all()
+
+    # It requires 2 AudioTracks of gaming and communication to trigger the
+    # gaming context.
     self.dut.bl4a.set_audio_attributes(
         bl4a_api.AudioAttributes(usage=bl4a_api.AudioAttributes.Usage.GAME),
         handle_audio_focus=False,
+    )
+    communication_player = self.dut.bt.addPlayer()
+    self.dut.bl4a.set_audio_attributes(
+        bl4a_api.AudioAttributes(
+            usage=bl4a_api.AudioAttributes.Usage.VOICE_COMMUNICATION,
+            content_type=bl4a_api.AudioAttributes.ContentType.SPEECH,
+        ),
+        handle_audio_focus=False,
+        player_id=communication_player,
+    )
+    self.dut.bt.audioSetRepeat(
+        android_constants.RepeatMode.ONE, communication_player
+    )
+    self.test_case_context.callback(
+        lambda: self.dut.bt.removePlayer(communication_player)
     )
 
     # Make sure audio is not streaming.
@@ -455,56 +480,52 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
       for ase in self.ref_ascs.ase_state_machines.values():
         await _wait_for_ase_state(ase, ascs.AseStateMachine.State.IDLE)
 
-    self.logger.info("[DUT] Put a VoIP call")
-    call = self.dut.bl4a.make_phone_call(
-        _CALLER_NAME,
-        _CALLER_NUMBER,
-        constants.Direction.OUTGOING,
-    )
-    self.test_case_context.push(call)
-
-    self.logger.info("[DUT] Start audio streaming")
+    self.logger.info("[DUT] Start gaming audio streaming")
     await asyncio.to_thread(self.dut.bt.audioPlaySine)
-    async with self.assert_not_timeout(
-        _DEFAULT_STEP_TIMEOUT_SECONDS,
-        msg="[REF] Wait for sink ASE to start",
-    ):
-      await _wait_for_ase_state(sink_ase, ascs.AseStateMachine.State.STREAMING)
-
+    self.logger.info("[DUT] Start communication audio streaming")
+    await asyncio.to_thread(self.dut.bt.audioPlaySine, communication_player)
     self.logger.info("[DUT] Start audio recording")
     recorder = await asyncio.to_thread(
         lambda: self.dut.bl4a.start_audio_recording(
             _RECORDING_PATH,
             source=bl4a_api.AudioRecorder.Source.VOICE_PERFORMANCE,
+            preferred_device_address=self.ref.random_address,
         )
     )
     self.test_case_context.push(recorder)
-    async with self.assert_not_timeout(
-        _DEFAULT_STEP_TIMEOUT_SECONDS,
-        msg="[REF] Wait for source ASE to start",
-    ):
-      await _wait_for_ase_state(
-          source_ase, ascs.AseStateMachine.State.STREAMING
-      )
-
-    # Check codec configuration.
-    sink_freq = self._get_sampling_frequency(sink_ase)
-    source_freq = self._get_sampling_frequency(source_ase)
-    self.logger.info("sink_freq: %r, source_freq: %r", sink_freq, source_freq)
 
     if self.dut.getprop(_AndroidProperty.GMAP_ENABLED) == "true":
       # Asymmetric configuration is enabled with GMAP.
       expected_sink_freq = bap.SamplingFrequency.FREQ_48000
     else:
       expected_sink_freq = bap.SamplingFrequency.FREQ_32000
-    self.assertEqual(sink_freq, expected_sink_freq)
-    self.assertEqual(source_freq, bap.SamplingFrequency.FREQ_32000)
+
+    def _condition_matched() -> bool:
+      sink_freq = self._get_sampling_frequency(sink_ase)
+      source_freq = self._get_sampling_frequency(source_ase)
+      self.logger.info("sink_freq: %r", sink_freq)
+      self.logger.info("source_freq: %r", source_freq)
+      return (
+          sink_freq >= expected_sink_freq
+          and source_freq >= bap.SamplingFrequency.FREQ_32000
+          and sink_ase.state == ascs.AseStateMachine.State.STREAMING
+          and source_ase.state == ascs.AseStateMachine.State.STREAMING
+      )
+
+    async with self.assert_not_timeout(
+        _DEFAULT_STEP_TIMEOUT_SECONDS,
+        msg="[REF] Wait for audio to start",
+    ):
+      async with condition:
+        await condition.wait_for(_condition_matched)
+    self.logger.info("[REF] Audio streaming started")
 
     # Streaming for 1 second.
     await asyncio.sleep(_STREAMING_TIME_SECONDS)
 
     self.logger.info("[DUT] Stop audio streaming")
     await asyncio.to_thread(self.dut.bt.audioStop)
+    await asyncio.to_thread(self.dut.bt.audioStop, communication_player)
     recorder.close()
     async with self.assert_not_timeout(
         _DEFAULT_STEP_TIMEOUT_SECONDS,

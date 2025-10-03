@@ -87,6 +87,7 @@ class AndroidSnippetDeviceWrapper:
   _SNIPPET_NAME: ClassVar[str] = "bt"
   _UI_AUTOMATOR_NAME: ClassVar[str] = "ui"
 
+  @retry_lib.retry_on_exception(initial_delay_sec=1, num_retries=3)
   def __init__(self, device: android_device.AndroidDevice) -> None:
     self.device = device
     # Sync time.
@@ -189,15 +190,16 @@ class AndroidSnippetDeviceWrapper:
     return None
 
   @property
-  def bluetooth_prebuilt_version(self) -> str | None:
+  def bluetooth_mainline_version(self) -> int:
     """Version of the Bluetooth prebuilt."""
     with contextlib.suppress(adb.AdbError):
       response = self.shell(
-          "pm list packages --apex-only --show-versioncode | egrep -i bt"
+          "pm list packages --apex-only --show-versioncode | egrep -i"
+          " android.bt"
       )
       if m := re.search(r"versionCode:(\d+)", response):
-        return m.group(1)
-    return None
+        return int(m.group(1))
+    return 0
 
 
 def parameterized(
@@ -749,7 +751,7 @@ class AndroidBumbleTestBase(BaseTestBase):
             test_class=self.TAG,
             properties={
                 "bt_fw_version": self.dut.firmware_version,
-                "bt_prebuilt_version": self.dut.bluetooth_prebuilt_version,
+                "bt_prebuilt_version": self.dut.bluetooth_mainline_version,
             },
         )
     )

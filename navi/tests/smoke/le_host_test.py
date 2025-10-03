@@ -362,7 +362,7 @@ class LeHostTest(navi_test_base.TwoDevicesTestBase):
     with self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER) as dut_cb:
 
       await self.ref.device.set_scan_enable(
-          inquiry_scan_enabled=0, page_scan_enabled=0
+          inquiry_scan_enabled=False, page_scan_enabled=False
       )
       # [REF] Start advertising.
       await self.ref.device.start_advertising(

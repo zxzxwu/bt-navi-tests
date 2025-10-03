@@ -14,7 +14,8 @@
 
 import asyncio
 import logging
-
+import statistics
+from unittest import mock
 from bumble import core
 from bumble import gatt
 from bumble import gatt_client as gatt_client_module
@@ -41,6 +42,7 @@ _CodedPhyOption = android_constants.CodedPhyOption
 _RX_THRESHOLD = 6
 _L2CAP_HEADER_SIZE = 4
 _DEFAULT_STEP_TIMEOUT_SECONDS = 10.0
+_DEFAULT_REPEAT_TIMES = 10
 _TRANSMISSION_TIMEOUT_SECONDS = 180.0
 _GATT_PAYLOAD_SIZE = 495
 _EXPECTED_THROUGHPUT_BYTES_PER_SECOND = {
@@ -122,61 +124,9 @@ class ThroughputTest(navi_test_base.TwoDevicesTestBase):
       phy: The PHY to be used for the connection.
       coded_options: The coded PHY options to be used for the connection.
     """
-    await self.ref.device.start_advertising(
-        own_address_type=hci.OwnAddressType.PUBLIC
-    )
-
-    self.logger.info("[DUT] Connect GATT to REF.")
-    dut_gatt_client = await self.dut.bl4a.connect_gatt_client(
-        address=self.ref.address,
-        transport=android_constants.Transport.LE,
-        address_type=android_constants.AddressTypeStatus.PUBLIC,
-    )
-    self.logger.info("[DUT] Set MTU and PHY.")
-    # Trigger Data Length Extension.
-    await dut_gatt_client.request_mtu(517)
-    # Set preferred PHY.
-    new_tx_phy, new_rx_phy = await dut_gatt_client.set_preferred_phy(
-        tx_phy=phy.to_mask(),
-        rx_phy=phy.to_mask(),
-        phy_options=coded_options,
-    )
-    self.assertEqual(new_tx_phy, phy)
-    self.assertEqual(new_rx_phy, phy)
-
-    ref_accept_future: asyncio.Future[l2cap.LeCreditBasedChannel] = (
-        asyncio.get_running_loop().create_future()
-    )
-    server = self.ref.device.create_l2cap_server(
-        # Same configuration as Android.
-        spec=l2cap.LeCreditBasedChannelSpec(
-            mtu=65535, mps=251, max_credits=65535
-        ),
-        handler=ref_accept_future.set_result,
-    )
-    self.logger.info("[REF] Listen L2CAP on PSM %d", server.psm)
-
-    self.logger.info("[DUT] Connect L2CAP channel to REF.")
-    ref_dut_l2cap_channel, dut_ref_l2cap_channel = await asyncio.gather(
-        ref_accept_future,
-        self.dut.bl4a.create_l2cap_channel(
-            address=self.ref.address,
-            secure=False,
-            psm=server.psm,
-            address_type=android_constants.AddressTypeStatus.PUBLIC,
-        ),
-    )
-    # Set the MPS to MAX_LEN - HEADER_SIZE(4) to avoid SDU fragmentation.
-    assert self.ref.device.host.le_acl_packet_queue
-    ref_dut_l2cap_channel.peer_mps = min(
-        ref_dut_l2cap_channel.peer_mps,
-        self.ref.device.host.le_acl_packet_queue.max_packet_size
-        - _L2CAP_HEADER_SIZE,
-    )
-
-    # Store received SDUs in queue.
+    tx_throughput_list = list[float]()
+    rx_throughput_list = list[float]()
     ref_sdu_rx_queue = asyncio.Queue[bytes]()
-    ref_dut_l2cap_channel.sink = ref_sdu_rx_queue.put_nowait
     expected_throughput_bytes_per_second = (
         _EXPECTED_THROUGHPUT_BYTES_PER_SECOND[(phy, coded_options)]
     )
@@ -187,30 +137,104 @@ class ThroughputTest(navi_test_base.TwoDevicesTestBase):
       while bytes_received < total_bytes:
         bytes_received += len(await ref_sdu_rx_queue.get())
 
-    self.logger.info("Start sending data from DUT to REF")
-    with performance_tool.Stopwatch() as tx_stopwatch:
-      async with self.assert_not_timeout(_TRANSMISSION_TIMEOUT_SECONDS):
-        await asyncio.gather(
-            dut_ref_l2cap_channel.write(bytes(total_bytes)),
-            ref_rx_task(),
+    for _ in range(_DEFAULT_REPEAT_TIMES):
+      try:
+        await self.ref.device.start_advertising(
+            own_address_type=hci.OwnAddressType.PUBLIC
         )
 
-    self.logger.info("Start sending data from REF to DUT")
-    with performance_tool.Stopwatch() as rx_stopwatch:
-      async with self.assert_not_timeout(_TRANSMISSION_TIMEOUT_SECONDS):
-        ref_dut_l2cap_channel.write(bytes(total_bytes))
-        await asyncio.gather(dut_ref_l2cap_channel.read(total_bytes))
+        self.logger.info("[DUT] Connect GATT to REF.")
+        dut_gatt_client = await self.dut.bl4a.connect_gatt_client(
+            address=self.ref.address,
+            transport=android_constants.Transport.LE,
+            address_type=android_constants.AddressTypeStatus.PUBLIC,
+        )
+        self.logger.info("[DUT] Set MTU and PHY.")
+        # Trigger Data Length Extension.
+        await dut_gatt_client.request_mtu(517)
+        # Set preferred PHY.
+        new_tx_phy, new_rx_phy = await dut_gatt_client.set_preferred_phy(
+            tx_phy=phy.to_mask(),
+            rx_phy=phy.to_mask(),
+            phy_options=coded_options,
+        )
+        self.assertEqual(new_tx_phy, phy)
+        self.assertEqual(new_rx_phy, phy)
 
-    tx_throughput = total_bytes / (tx_stopwatch.elapsed_time).total_seconds()
-    rx_throughput = total_bytes / (rx_stopwatch.elapsed_time).total_seconds()
-    self.logger.info("Tx Throughput: %.2f KB/s", tx_throughput / 1024)
-    self.logger.info("Rx Throughput: %.2f KB/s", rx_throughput / 1024)
+        ref_accept_future: asyncio.Future[l2cap.LeCreditBasedChannel] = (
+            asyncio.get_running_loop().create_future()
+        )
+        server = self.ref.device.create_l2cap_server(
+            # Same configuration as Android.
+            spec=l2cap.LeCreditBasedChannelSpec(
+                mtu=65535, mps=251, max_credits=65535
+            ),
+            handler=ref_accept_future.set_result,
+        )
+        self.logger.info("[REF] Listen L2CAP on PSM %d", server.psm)
+
+        self.logger.info("[DUT] Connect L2CAP channel to REF.")
+        ref_dut_l2cap_channel, dut_ref_l2cap_channel = await asyncio.gather(
+            ref_accept_future,
+            self.dut.bl4a.create_l2cap_channel(
+                address=self.ref.address,
+                secure=False,
+                psm=server.psm,
+                address_type=android_constants.AddressTypeStatus.PUBLIC,
+            )
+        )
+        # Set the MPS to MAX_LEN - HEADER_SIZE(4) to avoid SDU fragmentation.
+        assert self.ref.device.host.le_acl_packet_queue
+        ref_dut_l2cap_channel.peer_mps = min(
+            ref_dut_l2cap_channel.peer_mps,
+            self.ref.device.host.le_acl_packet_queue.max_packet_size
+            - _L2CAP_HEADER_SIZE,
+        )
+
+        # Store received SDUs in queue.
+        ref_dut_l2cap_channel.sink = ref_sdu_rx_queue.put_nowait
+
+        self.logger.info("Start sending data from DUT to REF")
+        with performance_tool.Stopwatch() as tx_stopwatch:
+          async with self.assert_not_timeout(_TRANSMISSION_TIMEOUT_SECONDS):
+            await asyncio.gather(
+                dut_ref_l2cap_channel.write(bytes(total_bytes)),
+                ref_rx_task(),
+            )
+
+        self.logger.info("Start sending data from REF to DUT")
+        with performance_tool.Stopwatch() as rx_stopwatch:
+          async with self.assert_not_timeout(_TRANSMISSION_TIMEOUT_SECONDS):
+            ref_dut_l2cap_channel.write(bytes(total_bytes))
+            await asyncio.gather(dut_ref_l2cap_channel.read(total_bytes))
+
+        tx_throughput = (
+            total_bytes / (tx_stopwatch.elapsed_time).total_seconds()
+        )
+        rx_throughput = (
+            total_bytes / (rx_stopwatch.elapsed_time).total_seconds()
+        )
+        self.logger.info("tx_throughput: %s", tx_throughput)
+        self.logger.info("rx_throughput: %s", rx_throughput)
+        tx_throughput_list.append(tx_throughput)
+        rx_throughput_list.append(rx_throughput)
+
+      except (core.BaseBumbleError, AssertionError):
+        self.logger.exception("Failed to send data")
+
+      finally:
+        await performance_tool.cleanup_connections(self.dut, self.ref)
+
     self.record_data(
         navi_test_base.RecordData(
             test_name=self.current_test_info.name,
             properties={
-                "tx_throughput_bytes_per_second": tx_throughput,
-                "rx_throughput_bytes_per_second": rx_throughput,
+                "tx_throughput_bytes_per_second": statistics.mean(
+                    tx_throughput_list
+                ),
+                "rx_throughput_bytes_per_second": statistics.mean(
+                    rx_throughput_list
+                ),
             },
         )
     )
@@ -250,43 +274,6 @@ class ThroughputTest(navi_test_base.TwoDevicesTestBase):
             write=lambda _, value: ref_written_queue.put_nowait(value)
         ),
     )
-    self.ref.device.add_service(
-        gatt.Service(
-            uuid=_SERVICE_UUID,
-            characteristics=[ref_characteristic],
-        )
-    )
-    await self.ref.device.start_advertising(
-        own_address_type=hci.OwnAddressType.PUBLIC
-    )
-
-    self.logger.info("[DUT] Connect to REF.")
-    gatt_client = await self.dut.bl4a.connect_gatt_client(
-        address=self.ref.address,
-        transport=android_constants.Transport.LE,
-        address_type=android_constants.AddressTypeStatus.PUBLIC,
-    )
-    self.logger.info("[DUT] Set MTU and PHY.")
-    # Trigger Data Length Extension.
-    await gatt_client.request_mtu(517)
-    # Set preferred PHY.
-    new_tx_phy, new_rx_phy = await gatt_client.set_preferred_phy(
-        tx_phy=phy.to_mask(),
-        rx_phy=phy.to_mask(),
-        phy_options=coded_options,
-    )
-    self.assertEqual(new_tx_phy, phy)
-    self.assertEqual(new_rx_phy, phy)
-    characteristic_handle = bl4a_api.find_characteristic_by_uuid(
-        _CHARACTERISTIC_UUID, await gatt_client.discover_services()
-    ).handle
-    if characteristic_handle is None:
-      self.fail("Characteristic not found.")
-    # Subscribe to notifications.
-    await gatt_client.subscribe_characteristic_notifications(
-        characteristic_handle
-    )
-
     async def ref_rx_task():
       bytes_received = 0
       while bytes_received < total_bytes:
@@ -301,7 +288,7 @@ class ThroughputTest(navi_test_base.TwoDevicesTestBase):
         )
         bytes_sent += payload_size
 
-    async def dut_rx_task():
+    async def dut_rx_task(gatt_client: bl4a_api.GattClient):
       bytes_received = 0
       while True:
         # Snippet RPC latency is very high, so we can only poll events until
@@ -317,37 +304,97 @@ class ThroughputTest(navi_test_base.TwoDevicesTestBase):
         if bytes_received >= total_bytes:
           break
 
-    self.logger.info("Start sending data from DUT to REF")
-    with performance_tool.Stopwatch() as tx_stopwatch:
-      async with self.assert_not_timeout(_TRANSMISSION_TIMEOUT_SECONDS):
-        await asyncio.gather(
-            gatt_client.write_characteristic_long(
-                characteristic_handle,
-                bytes(total_bytes),
-                mtu=_GATT_PAYLOAD_SIZE,
-                write_type=android_constants.GattWriteType.NO_RESPONSE,
-            ),
-            ref_rx_task(),
+    tx_throughput_list = list[float]()
+    rx_throughput_list = list[float]()
+
+    for _ in range(_DEFAULT_REPEAT_TIMES):
+      try:
+        self.ref.device.add_service(
+            gatt.Service(
+                uuid=_SERVICE_UUID,
+                characteristics=[ref_characteristic],
+            )
+        )
+        await self.ref.device.start_advertising(
+            own_address_type=hci.OwnAddressType.PUBLIC
+        )
+        self.logger.info("[DUT] Connect to REF.")
+        gatt_client = await self.dut.bl4a.connect_gatt_client(
+            address=self.ref.address,
+            transport=android_constants.Transport.LE,
+            address_type=android_constants.AddressTypeStatus.PUBLIC,
+        )
+        self.logger.info("[DUT] Set MTU and PHY.")
+        # Trigger Data Length Extension.
+        await gatt_client.request_mtu(517)
+        # Set preferred PHY.
+        new_tx_phy, new_rx_phy = await gatt_client.set_preferred_phy(
+            tx_phy=phy.to_mask(),
+            rx_phy=phy.to_mask(),
+            phy_options=coded_options,
+        )
+        self.assertEqual(new_tx_phy, phy)
+        self.assertEqual(new_rx_phy, phy)
+        self.logger.info("[DUT] PHY checked.")
+
+        characteristic_handle = bl4a_api.find_characteristic_by_uuid(
+            _CHARACTERISTIC_UUID, await gatt_client.discover_services()
+        ).handle
+        self.logger.info("[DUT] Characteristic handle created.")
+        if characteristic_handle is None:
+          self.fail("Characteristic not found.")
+        # Subscribe to notifications.
+        await gatt_client.subscribe_characteristic_notifications(
+            characteristic_handle
         )
 
-    self.logger.info("Start sending data from REF to DUT")
-    with performance_tool.Stopwatch() as rx_stopwatch:
-      async with self.assert_not_timeout(_TRANSMISSION_TIMEOUT_SECONDS):
-        await asyncio.gather(
-            dut_rx_task(),
-            ref_tx_task(),
-        )
+        self.logger.info("Start sending data from DUT to REF")
+        with performance_tool.Stopwatch() as tx_stopwatch:
+          async with self.assert_not_timeout(_TRANSMISSION_TIMEOUT_SECONDS):
+            await asyncio.gather(
+                gatt_client.write_characteristic_long(
+                    characteristic_handle,
+                    bytes(total_bytes),
+                    mtu=_GATT_PAYLOAD_SIZE,
+                    write_type=android_constants.GattWriteType.NO_RESPONSE,
+                ),
+                ref_rx_task(),
+            )
 
-    tx_throughput = total_bytes / (tx_stopwatch.elapsed_time).total_seconds()
-    rx_throughput = total_bytes / (rx_stopwatch.elapsed_time).total_seconds()
-    self.logger.info("Tx Throughput: %.2f KB/s", tx_throughput / 1024)
-    self.logger.info("Rx Throughput: %.2f KB/s", rx_throughput / 1024)
+        self.logger.info("Start sending data from REF to DUT")
+        with performance_tool.Stopwatch() as rx_stopwatch:
+          async with self.assert_not_timeout(_TRANSMISSION_TIMEOUT_SECONDS):
+            await asyncio.gather(
+                dut_rx_task(gatt_client),
+                ref_tx_task(),
+            )
+        tx_throughput = (
+            total_bytes / (tx_stopwatch.elapsed_time).total_seconds()
+        )
+        rx_throughput = (
+            total_bytes / (rx_stopwatch.elapsed_time).total_seconds()
+        )
+        self.logger.info("tx_throughput: %s", tx_throughput)
+        self.logger.info("rx_throughput: %s", rx_throughput)
+        tx_throughput_list.append(tx_throughput)
+        rx_throughput_list.append(rx_throughput)
+
+      except (core.BaseBumbleError, AssertionError):
+        self.logger.exception("Failed to send data")
+
+      finally:
+        await performance_tool.cleanup_connections(self.dut, self.ref)
+
     self.record_data(
         navi_test_base.RecordData(
             test_name=self.current_test_info.name,
             properties={
-                "tx_throughput_bytes_per_second": tx_throughput,
-                "rx_throughput_bytes_per_second": rx_throughput,
+                "tx_throughput_bytes_per_second": statistics.mean(
+                    tx_throughput_list
+                ),
+                "rx_throughput_bytes_per_second": statistics.mean(
+                    rx_throughput_list
+                ),
             },
         )
     )
@@ -355,15 +402,22 @@ class ThroughputTest(navi_test_base.TwoDevicesTestBase):
   @navi_test_base.retry(2)
   async def test_rfcomm(self) -> None:
     """Tests RFCOMM throughput."""
+    total_bytes = 4 * 1024 * 1024  # 4 MB
+    ref_sdu_rx_queue = asyncio.Queue[bytes]()
+    async def ref_rx_task():
+      bytes_received = 0
+      while bytes_received < total_bytes:
+        bytes_received += len(await ref_sdu_rx_queue.get())
+    tx_throughput_list = list[float]()
+    rx_throughput_list = list[float]()
 
     await self.classic_connect_and_pair()
-
-    ref_accept_future: asyncio.Future[rfcomm.DLC] = (
-        asyncio.get_running_loop().create_future()
+    await performance_tool.terminate_connection_from_ref(self.dut, self.ref)
+    rfcomm_server = rfcomm.Server(self.ref.device)
+    channel = rfcomm_server.listen(
+        acceptor=mock.MagicMock(),
     )
-    channel = rfcomm.Server(self.ref.device).listen(
-        acceptor=ref_accept_future.set_result
-    )
+    self.logger.info("[REF] Listen RFCOMM on channel %d.", channel)
     self.ref.device.sdp_service_records[_RFCOMM_SERVICE_RECORD_HANDLE] = (
         rfcomm.make_service_sdp_records(
             service_record_handle=_RFCOMM_SERVICE_RECORD_HANDLE,
@@ -371,55 +425,68 @@ class ThroughputTest(navi_test_base.TwoDevicesTestBase):
             uuid=core.UUID(_RFCOMM_UUID),
         )
     )
-    self.logger.info("[REF] Listen RFCOMM on channel %d.", channel)
 
-    self.logger.info("[DUT] Connect RFCOMM channel to REF.")
-    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
-      ref_dut_dlc, dut_ref_dlc = await asyncio.gather(
-          ref_accept_future,
-          self.dut.bl4a.create_rfcomm_channel(
-              address=self.ref.address,
-              secure=True,
-              uuid=_RFCOMM_UUID,
-          ),
-      )
-
-    # Store received SDUs in queue.
-    ref_sdu_rx_queue = asyncio.Queue[bytes]()
-    ref_dut_dlc.sink = ref_sdu_rx_queue.put_nowait
-    # Set the threshold to 6 to avoid running out of buffer.
-    ref_dut_dlc.rx_credits_threshold = _RX_THRESHOLD
-    total_bytes = 4 * 1024 * 1024  # 4 MB
-
-    async def ref_rx_task():
-      bytes_received = 0
-      while bytes_received < total_bytes:
-        bytes_received += len(await ref_sdu_rx_queue.get())
-
-    self.logger.info("Start sending data from DUT to REF")
-    with performance_tool.Stopwatch() as tx_stopwatch:
-      async with self.assert_not_timeout(_TRANSMISSION_TIMEOUT_SECONDS):
-        await asyncio.gather(
-            dut_ref_dlc.write(bytes(total_bytes)),
-            ref_rx_task(),
+    for _ in range(_DEFAULT_REPEAT_TIMES):
+      try:
+        ref_accept_future: asyncio.Future[rfcomm.DLC] = (
+            asyncio.get_running_loop().create_future()
         )
+        rfcomm_server.acceptors[channel] = ref_accept_future.set_result
+        self.logger.info("[DUT] Connect RFCOMM channel to REF.")
+        async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+          ref_dut_dlc, dut_ref_dlc = await asyncio.gather(
+              ref_accept_future,
+              self.dut.bl4a.create_rfcomm_channel(
+                  address=self.ref.address,
+                  secure=True,
+                  uuid=_RFCOMM_UUID,
+              ),
+          )
+        ref_dut_dlc.sink = ref_sdu_rx_queue.put_nowait
+        # Set the threshold to 6 to avoid running out of buffer.
+        ref_dut_dlc.rx_credits_threshold = _RX_THRESHOLD
 
-    self.logger.info("Start sending data from REF to DUT")
-    with performance_tool.Stopwatch() as rx_stopwatch:
-      async with self.assert_not_timeout(_TRANSMISSION_TIMEOUT_SECONDS):
-        ref_dut_dlc.write(bytes(total_bytes))
-        await dut_ref_dlc.read(total_bytes)
+        self.logger.info("Start sending data from DUT to REF")
+        with performance_tool.Stopwatch() as tx_stopwatch:
+          async with self.assert_not_timeout(_TRANSMISSION_TIMEOUT_SECONDS):
+            await asyncio.gather(
+                dut_ref_dlc.write(bytes(total_bytes)),
+                ref_rx_task(),
+            )
 
-    tx_throughput = total_bytes / (tx_stopwatch.elapsed_time).total_seconds()
-    rx_throughput = total_bytes / (rx_stopwatch.elapsed_time).total_seconds()
-    self.logger.info("Tx Throughput: %.2f KB/s", tx_throughput / 1024)
-    self.logger.info("Rx Throughput: %.2f KB/s", rx_throughput / 1024)
+        self.logger.info("Start sending data from REF to DUT")
+        with performance_tool.Stopwatch() as rx_stopwatch:
+          async with self.assert_not_timeout(_TRANSMISSION_TIMEOUT_SECONDS):
+            ref_dut_dlc.write(bytes(total_bytes))
+            await dut_ref_dlc.read(total_bytes)
+
+        tx_throughput = (
+            total_bytes / (tx_stopwatch.elapsed_time).total_seconds()
+        )
+        rx_throughput = (
+            total_bytes / (rx_stopwatch.elapsed_time).total_seconds()
+        )
+        self.logger.info("tx_throughput: %s", tx_throughput)
+        self.logger.info("rx_throughput: %s", rx_throughput)
+        tx_throughput_list.append(tx_throughput)
+        rx_throughput_list.append(rx_throughput)
+
+      except (core.BaseBumbleError, AssertionError):
+        self.logger.exception("Failed to send data")
+
+      finally:
+        await performance_tool.terminate_connection_from_ref(self.dut, self.ref)
+
     self.record_data(
         navi_test_base.RecordData(
             test_name=self.current_test_info.name,
             properties={
-                "tx_throughput_bytes_per_second": tx_throughput,
-                "rx_throughput_bytes_per_second": rx_throughput,
+                "tx_throughput_bytes_per_second": statistics.mean(
+                    tx_throughput_list
+                ),
+                "rx_throughput_bytes_per_second": statistics.mean(
+                    rx_throughput_list
+                ),
             },
         )
     )
