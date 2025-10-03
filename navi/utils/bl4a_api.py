@@ -94,6 +94,7 @@ class Module(enum.Enum):
   BQR = enum.auto()
   A2DP_SINK = enum.auto()
   AVRCP_CONTROLLER = enum.auto()
+  HAP_CLIENT = enum.auto()
 
 
 @dataclasses.dataclass
@@ -111,7 +112,7 @@ class CallbackHandler:
 
   snippet: snippet_stub.BluetoothSnippet
   handler: callback_handler_base.CallbackHandlerBase
-  module: Module | None = None
+  on_close: Callable[[str], None] | None = None
 
   @classmethod
   def for_module(
@@ -132,96 +133,80 @@ class CallbackHandler:
     match module:
       case Module.AUDIO:
         handler = snippet.audioRegisterCallback()
+        on_close = snippet.audioUnregisterCallback
       case Module.A2DP:
         handler = snippet.a2dpSetup()
+        on_close = snippet.a2dpTeardown
       case Module.ADAPTER:
         handler = snippet.adapterSetup()
+        on_close = snippet.adapterTeardown
       case Module.HFP_AG:
         handler = snippet.hfpAgSetup()
+        on_close = snippet.hfpAgTeardown
       case Module.HFP_HF:
         handler = snippet.hfpHfSetup()
+        on_close = snippet.hfpHfTeardown
       case Module.TELECOM:
         handler = snippet.registerTelecomCallback()
+        on_close = snippet.unregisterTelecomCallback
       case Module.LE_AUDIO:
         handler = snippet.registerLeAudioCallback()
+        on_close = snippet.unregisterLeAudioCallback
       case Module.INPUT:
         handler = snippet.registerInputEventCallback()
+        on_close = snippet.unregisterInputEventCallback
       case Module.HID_HOST:
         handler = snippet.registerHidHostCallback()
+        on_close = snippet.unregisterHidHostCallback
       case Module.PAN:
         handler = snippet.registerPanCallback()
+        on_close = snippet.unregisterPanCallback
       case Module.ASHA:
         handler = snippet.registerProfileCallback(
             android_constants.Profile.HEARING_AID
         )
+        on_close = snippet.unregisterProfileCallback
       case Module.PBAP:
         handler = snippet.registerProfileCallback(
             android_constants.Profile.PBAP
         )
+        on_close = snippet.unregisterProfileCallback
       case Module.MAP:
         handler = snippet.registerProfileCallback(android_constants.Profile.MAP)
+        on_close = snippet.unregisterProfileCallback
       case Module.SAP:
         handler = snippet.registerProfileCallback(android_constants.Profile.SAP)
+        on_close = snippet.unregisterProfileCallback
       case Module.BASS:
         handler = snippet.registerBassCallback()
+        on_close = snippet.unregisterBassCallback
       case Module.PLAYER:
         handler = snippet.registerPlayerListener()
+        on_close = snippet.unregisterPlayerListener
       case Module.BQR:
         handler = snippet.registerBluetoothQualityReportCallback()
+        on_close = snippet.unregisterBluetoothQualityReportCallback
       case Module.A2DP_SINK:
         handler = snippet.registerProfileCallback(
             android_constants.Profile.A2DP_SINK
         )
+        on_close = snippet.unregisterProfileCallback
       case Module.AVRCP_CONTROLLER:
         handler = snippet.registerProfileCallback(
             android_constants.Profile.AVRCP_CONTROLLER
         )
+        on_close = snippet.unregisterProfileCallback
+      case Module.HAP_CLIENT:
+        handler = snippet.registerHapClientCallback()
+        on_close = snippet.unregisterHapClientCallback
       case _:
         raise ValueError(f'Unsupported module: {module}')
-    return cls(snippet=snippet, handler=handler, module=module)
+    return cls(snippet=snippet, handler=handler, on_close=on_close)
 
   def close(self) -> None:
     """Closes the callback handler."""
-    match self.module:
-      case Module.AUDIO:
-        self.snippet.audioUnregisterCallback(self.handler.callback_id)
-      case Module.A2DP:
-        self.snippet.a2dpTeardown(self.handler.callback_id)
-      case Module.ADAPTER:
-        self.snippet.adapterTeardown(self.handler.callback_id)
-      case Module.HFP_AG:
-        self.snippet.hfpAgTeardown(self.handler.callback_id)
-      case Module.HFP_HF:
-        self.snippet.hfpHfTeardown(self.handler.callback_id)
-      case Module.TELECOM:
-        self.snippet.unregisterTelecomCallback(self.handler.callback_id)
-      case Module.LE_AUDIO:
-        self.snippet.unregisterLeAudioCallback(self.handler.callback_id)
-      case Module.INPUT:
-        self.snippet.unregisterInputEventCallback(self.handler.callback_id)
-      case Module.HID_HOST:
-        self.snippet.unregisterHidHostCallback(self.handler.callback_id)
-      case Module.PAN:
-        self.snippet.unregisterPanCallback(self.handler.callback_id)
-      case (
-          Module.ASHA
-          | Module.PBAP
-          | Module.MAP
-          | Module.SAP
-          | Module.A2DP_SINK
-          | Module.AVRCP_CONTROLLER
-      ):
-        self.snippet.unregisterProfileCallback(self.handler.callback_id)
-      case Module.BASS:
-        self.snippet.unregisterBassCallback(self.handler.callback_id)
-      case Module.PLAYER:
-        self.snippet.unregisterPlayerListener(self.handler.callback_id)
-      case Module.BQR:
-        self.snippet.unregisterBluetoothQualityReportCallback(
-            self.handler.callback_id
-        )
-      case _:
-        raise ValueError(f'Unsupported module: {self.module}')
+    if self.on_close is not None:
+      self.on_close(self.handler.callback_id)
 
   async def wait_for_event(
       self,
@@ -587,6 +572,24 @@ class A2dpPlayingStateChanged(JsonDeserializableEvent):
           _MAPPER: android_constants.A2dpState,
       }
   )
+
+
+@dataclasses.dataclass
+class AdapterStateChanged(JsonDeserializableEvent):
+  """android.bluetooth.adapter.action.STATE_CHANGED.
+
+  Attributes:
+    state: new state of the Bluetooth adapter.
+  """
+
+  state: android_constants.AdapterState = dataclasses.field(
+      metadata={
+          _FIELD: snippet_constants.FIELD_STATE,
+          _MAPPER: android_constants.AdapterState,
+      }
+  )
+
+  EVENT_NAME = snippet_constants.ADAPTER_STATE_CHANGED
 
 
 @dataclasses.dataclass
@@ -1197,6 +1200,35 @@ class BatchScanResults(JsonDeserializableEvent):
 
 
 @dataclasses.dataclass
+class PresetInfoChanged(JsonDeserializableEvent):
+  """android.bluetooth.BluetoothHapClient.Callback.onPresetInfoChanged."""
+
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  reason: android_constants.BluetoothStatusCode = dataclasses.field(
+      metadata={
+          _FIELD: snippet_constants.FIELD_REASON,
+          _MAPPER: android_constants.BluetoothStatusCode,
+      }
+  )
+
+  EVENT_NAME = snippet_constants.PRESET_INFO_CHANGED
+
+
+@dataclasses.dataclass
+class VoiceCommand(JsonDeserializableEvent):
+  """android.intent.action.VOICE_COMMAND.
+
+  Attributes:
+    state: Whether the voice command is enabled or not.
+  """
+
+  state: bool
+  EVENT_NAME = snippet_constants.VOICE_COMMAND
+
+
+@dataclasses.dataclass
 class LegacyAdvertiseSettings:
   """android.bluetooth.le.AdvertiseSettings."""
 
@@ -1632,6 +1664,8 @@ class AudioRecorder:
       snippet: snippet_stub.BluetoothSnippet,
       path: str,
       source: Source,
+      preferred_device_address: str | None = None,
+      preferred_device_type: android_constants.AudioDeviceType | None = None,
   ):
     """Class initializer.
 
@@ -1639,10 +1673,14 @@ class AudioRecorder:
         snippet: snippet client instance.
         path: Path on device to save the recorded media file.
         source: Source of the audio to record.
+        preferred_device_address: Address of the preferred device.
+        preferred_device_type: Type of the preferred device.
     """
     self.snippet = snippet
     self.path = path
-    snippet.startRecording(path, source)
+    snippet.startRecording(
+        path, source, preferred_device_address, preferred_device_type
+    )
 
   def close(self) -> None:
     """Closes the phone call."""
@@ -2296,12 +2334,10 @@ class GattServer(CallbackHandler):
     """
     callback_handler = snippet.gattServerOpen()
     return cls(
-        snippet=snippet, handler=callback_handler, module=Module.GATT_SERVER
+        snippet=snippet,
+        handler=callback_handler,
+        on_close=snippet.gattServerClose,
     )
-
-  @override
-  def close(self) -> None:
-    self.snippet.gattServerClose(self.handler.callback_id)
 
   async def add_service(self, service: GattService) -> None:
     """Adds a GATT service to GATT server.
@@ -2459,10 +2495,11 @@ class SnippetWrapper:
       self,
       attributes: AudioAttributes,
       handle_audio_focus: bool,
+      player_id: str | None = None,
   ) -> None:
     """Sets audio attributes."""
     self.snippet.setAudioAttributes(
-        _make_json_object(attributes), handle_audio_focus
+        _make_json_object(attributes), handle_audio_focus, player_id
     )
 
   def register_callback(self, module: Module) -> CallbackHandler:
@@ -2724,17 +2761,27 @@ class SnippetWrapper:
       self,
       path: str,
       source: AudioRecorder.Source = AudioRecorder.Source.DEFAULT,
+      preferred_device_address: str | None = None,
+      preferred_device_type: android_constants.AudioDeviceType | None = None,
   ) -> AudioRecorder:
     """Starts audio recording.
 
     Args:
       path: Path to the recording file.
       source: Source of the audio recording.
+      preferred_device_address: Address of the preferred recording device.
+      preferred_device_type: Type of the preferred recording device.
 
     Returns:
       The audio recorder control block.
     """
-    return AudioRecorder(self.snippet, path, source)
+    return AudioRecorder(
+        self.snippet,
+        path=path,
+        source=source,
+        preferred_device_address=preferred_device_address,
+        preferred_device_type=preferred_device_type,
+    )
 
   def create_bond_oob(
       self,
@@ -2777,3 +2824,25 @@ class SnippetWrapper:
         key: bytes(value) if isinstance(value, list) else value
         for key, value in self.snippet.generateLocalOobData(transport).items()
     })  # type: ignore[arg-type]
+
+  def get_all_hap_preset_info(self, device: str) -> dict[int, str]:
+    """Gets all HAP preset info.
+
+    Args:
+      device: Address of target device.
+
+    Returns:
+      A mapping of preset index to preset name.
+    """
+    return {
+        int(index): name
+        for index, name in self.snippet.getAllHapPresetInfo(device).items()
+    }
+
+  def register_voice_command_callback(self) -> CallbackHandler:
+    """Registers a callback for voice command."""
+    return CallbackHandler(
+        snippet=self.snippet,
+        handler=self.snippet.registerVoiceCommandCallback(),
+        on_close=self.snippet.unregisterVoiceCommandCallback,
+    )

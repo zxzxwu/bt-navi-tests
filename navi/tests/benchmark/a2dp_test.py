@@ -24,6 +24,7 @@ from mobly import test_runner
 from typing_extensions import override
 
 from navi.bumble_ext import a2dp as a2dp_ext
+from navi.bumble_ext import avrcp as avrcp_ext
 from navi.tests import navi_test_base
 from navi.tests.benchmark import performance_tool
 from navi.tests.benchmark import test_base
@@ -110,9 +111,9 @@ class A2dpTest(test_base.PerformanceTestBase):
         _A2DP_SERVICE_RECORD_HANDLE,
     )
     avrcp_delegator = AvrcpDelegate(
-        supported_events=(avrcp.EventId.VOLUME_CHANGED,)
+        supported_events=(avrcp.EventId.VOLUME_CHANGED,)  # type: ignore[wrong-arg-types]
     )
-    avrcp_protocol = a2dp_ext.setup_avrcp_server(
+    avrcp_protocol = avrcp_ext.setup_server(
         self.ref.device,
         avrcp_controller_handle=_AVRCP_CONTROLLER_RECORD_HANDLE,
         avrcp_target_handle=_AVRCP_TARGET_RECORD_HANDLE,
@@ -246,7 +247,7 @@ class A2dpTest(test_base.PerformanceTestBase):
     )
     ref_avrcp_protocol: avrcp.Protocol | None = None
     if avrcp_enabled:
-      ref_avrcp_protocol = a2dp_ext.setup_avrcp_server(
+      ref_avrcp_protocol = avrcp_ext.setup_server(
           self.ref.device,
           avrcp_controller_handle=_AVRCP_CONTROLLER_RECORD_HANDLE,
           avrcp_target_handle=_AVRCP_TARGET_RECORD_HANDLE,

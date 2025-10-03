@@ -28,7 +28,6 @@ from typing import ClassVar, TypeVar
 
 from bumble import a2dp
 from bumble import avdtp
-from bumble import avrcp
 from bumble import codecs
 from bumble import device as bumble_device
 
@@ -443,33 +442,3 @@ def setup_sink_server(
       ),
   })
   return listener
-
-
-def setup_avrcp_server(
-    device: bumble_device.Device,
-    avrcp_controller_handle: int,
-    avrcp_target_handle: int,
-    delegate: avrcp.Delegate | None = None,
-) -> avrcp.Protocol:
-  """Sets up the AVRCP server on the device.
-
-  Args:
-    device: The device to set up the AVRCP server on.
-    avrcp_controller_handle: The handle of the AVRCP service record.
-    avrcp_target_handle: The handle of the AVRCP target service record.
-    delegate: The delegate to handle AVRCP events.
-
-  Returns:
-    The AVRCP protocol.
-  """
-  avrcp_protocol = avrcp.Protocol(delegate)
-  avrcp_protocol.listen(device)
-  device.sdp_service_records.update({
-      avrcp_controller_handle: avrcp.make_controller_service_sdp_records(
-          avrcp_controller_handle
-      ),
-      avrcp_target_handle: avrcp.make_target_service_sdp_records(
-          avrcp_target_handle
-      ),
-  })
-  return avrcp_protocol

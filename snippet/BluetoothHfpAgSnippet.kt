@@ -115,6 +115,16 @@ class BluetoothHfpAgSnippet : Snippet {
     return BluetoothHeadset::class.java.getMethod("isInbandRingingEnabled").invoke(proxy) as Boolean
   }
 
+  /** Starts voice recognition. */
+  @Rpc(description = "Start voice recognition")
+  fun hfpAgStartVoiceRecognition(address: String): Boolean =
+    proxy.startVoiceRecognition(bluetoothAdapter.getRemoteDevice(address))
+
+  /** Stops voice recognition. */
+  @Rpc(description = "Stop voice recognition")
+  fun hfpAgStopVoiceRecognition(address: String): Boolean =
+    proxy.stopVoiceRecognition(bluetoothAdapter.getRemoteDevice(address))
+
   /** Gets SCO connection state. */
   @Rpc(description = "Get SCO connection state")
   fun hfpAgGetAudioState(address: String): Int =

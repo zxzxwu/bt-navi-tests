@@ -31,6 +31,7 @@ from mobly import signals
 from typing_extensions import override
 
 from navi.bumble_ext import a2dp as a2dp_ext
+from navi.bumble_ext import avrcp as avrcp_ext
 from navi.tests import navi_test_base
 from navi.utils import android_constants
 from navi.utils import audio
@@ -103,9 +104,6 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
         != "true"
     ):
       raise signals.TestAbortClass("A2DP is not enabled on DUT.")
-    if self.dut.device.build_info["hardware"] == "cutf_cvm":
-      # Force enable OPUS on Cuttlefish.
-      self.dut.setprop(_PROPERTY_OPUS_ENABLED, "true")
     self.dut_supported_codecs = [
         codec
         for codec in _A2dpCodec
@@ -142,9 +140,9 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
         _A2DP_SERVICE_RECORD_HANDLE,
     )
     avrcp_delegator = AvrcpDelegate(
-        supported_events=(avrcp.EventId.VOLUME_CHANGED,)
+        supported_events=(avrcp.EventId.VOLUME_CHANGED,)  # type: ignore[wrong-arg-types]
     )
-    avrcp_protocol = a2dp_ext.setup_avrcp_server(
+    avrcp_protocol = avrcp_ext.setup_server(
         self.ref.device,
         avrcp_controller_handle=_AVRCP_CONTROLLER_RECORD_HANDLE,
         avrcp_target_handle=_AVRCP_TARGET_RECORD_HANDLE,

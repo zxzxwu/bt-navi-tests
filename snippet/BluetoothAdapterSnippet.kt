@@ -129,6 +129,13 @@ class BluetoothAdapterSnippet : Snippet {
     result
   }
 
+  /**
+   * Gets the current state of the local Bluetooth adapter defined in
+   * [android.bluetooth.BluetoothAdapter.STATE_*].
+   */
+  @Rpc(description = "Get Bluetooth Adapter state")
+  fun getAdapterState(): Int = bluetoothAdapter.getState()
+
   /** Enables Bluetooth and returns the operation result. */
   @Suppress("DEPRECATION")
   @Rpc(description = "Enable Bluetooth")
@@ -164,6 +171,7 @@ class BluetoothAdapterSnippet : Snippet {
         addAction(BluetoothDevice.ACTION_FOUND)
         addAction(BluetoothDevice.ACTION_BATTERY_LEVEL_CHANGED)
         addAction(BluetoothDevice.ACTION_UUID)
+        addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
       }
     broadcastReceivers[callbackId] =
       object : BroadcastReceiver() {
@@ -176,6 +184,8 @@ class BluetoothAdapterSnippet : Snippet {
           val pin = intent.getIntExtra(BluetoothDevice.EXTRA_PAIRING_KEY, BluetoothDevice.ERROR)
           val state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
           val transport = intent.getIntExtra(BluetoothDevice.EXTRA_TRANSPORT, BluetoothDevice.ERROR)
+          val adapterState =
+            intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
           when (intent.action) {
             BluetoothDevice.ACTION_PAIRING_REQUEST ->
               postSnippetEvent(callbackId, SnippetConstants.PAIRING_REQUEST) {
@@ -222,6 +232,10 @@ class BluetoothAdapterSnippet : Snippet {
                       uuids.map { it.uuid.toString() }.toTypedArray(),
                     )
                   }
+              }
+            BluetoothAdapter.ACTION_STATE_CHANGED ->
+              postSnippetEvent(callbackId, SnippetConstants.ADAPTER_STATE_CHANGED) {
+                putInt(SnippetConstants.FIELD_STATE, adapterState)
               }
           }
         }

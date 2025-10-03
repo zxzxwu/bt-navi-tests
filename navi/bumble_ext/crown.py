@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+import contextlib
 import io
 import subprocess
 import sys
@@ -34,6 +35,7 @@ import bumble.transport.android_netsim
 import bumble.transport.common
 import grpc.aio
 from mobly.controllers import android_device
+from mobly.controllers.android_device_lib import adb
 from typing_extensions import override
 
 from navi.utils import resources
@@ -225,6 +227,9 @@ class AndroidCrownAdapter(CrownAdapter):
     # Sync time.
     adb_snippets.sync_time(self.ad)
 
+    # Enable BT Snoop.
+    adb_snippets.enable_btsnoop(self.ad)
+
     # Enable Satellite Mode to avoid turning on Bluetooth.
     self.ad.adb.shell(
         ['settings', 'put', 'global', 'satellite_mode_enabled', '1']
@@ -235,6 +240,17 @@ class AndroidCrownAdapter(CrownAdapter):
     )
     self.ad.adb.shell(['cmd', 'bluetooth_manager', 'disable'])
     self.ad.adb.shell(['cmd', 'bluetooth_manager', 'wait-for-state:STATE_OFF'])
+    # TODO: Remove this once the bug is fixed.
+    if (
+        self.ad.adb.shell(['getprop', 'persist.bluetooth.leaudio_sw_offload'])
+        != 'false'
+    ):
+      self.ad.adb.shell(
+          ['setprop', 'persist.bluetooth.leaudio_sw_offload', 'false']
+      )
+      with contextlib.suppress(adb.Error):
+        self.ad.adb.shell(['pkill -U bluetooth'])
+        time.sleep(0.5)
 
     # Push HCI proxy to device.
     abi_type = self.ad.adb.getprop('ro.product.cpu.abi')

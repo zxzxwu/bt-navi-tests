@@ -364,9 +364,6 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
           // (max_system_call_volume - min_system_call_volume)
       ) + _MIN_HFP_VOLUME
 
-    # TODO: Remove volume reset before test when conversion is
-    # fixed.
-    self.dut.bt.setVolume(_STREAM_TYPE_CALL, 2)
     expect_dut_volume = max(
         min_system_call_volume,
         (self.dut.bt.getVolume(_STREAM_TYPE_CALL) + 1)
@@ -426,9 +423,6 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
         supported_ag_features=[
             hfp.AgFeature.HF_INDICATORS,
             hfp.AgFeature.ENHANCED_CALL_STATUS,
-            # TODO: Remove this feature when feature check is
-            # fixed on Android.
-            hfp.AgFeature.EXTENDED_ERROR_RESULT_CODES,
         ],
         supported_hf_indicators=[
             hfp.HfIndicator.BATTERY_LEVEL,
