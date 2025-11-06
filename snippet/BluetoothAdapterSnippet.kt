@@ -44,6 +44,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.google.android.mobly.snippet.Snippet
 import com.google.android.mobly.snippet.rpc.AsyncRpc
 import com.google.android.mobly.snippet.rpc.Rpc
+import com.google.android.mobly.snippet.rpc.RpcDefault
 import com.google.android.mobly.snippet.rpc.RpcOptional
 import com.google.wireless.android.pixel.bluetooth.snippet.Utils.postSnippetEvent
 import java.util.UUID
@@ -151,7 +152,8 @@ class BluetoothAdapterSnippet : Snippet {
       .catch { exception ->
         if (exception is TimeoutCancellationException) {
           throw RuntimeException(
-            "Bluetooth isn't at state ${state} after ${BLUETOOTH_ON_OFF_TIMEOUT}, " +
+            "Bluetooth isn't at state=${BluetoothAdapter.nameForState(state)} after " +
+              "${BLUETOOTH_ON_OFF_TIMEOUT}, " +
               "final state=${BluetoothAdapter.nameForState(adapterState.value)}"
           )
         }
@@ -277,13 +279,14 @@ class BluetoothAdapterSnippet : Snippet {
   /**
    * Creates bond to a remote device with [address] and [addressType] over [transport], and returns
    * true if successful.
-   *
-   * Note: Mobly Snippet lib cannot invoke Kotlin method with default value, and its @RpcDefault
-   * annotation cannot identify Kotlin primitive types. As a workaround, we use @RpcOptional
-   * annotation and pass a null value here.
    */
   @Rpc(description = "Create bond to a device")
-  fun createBond(address: String, transport: Int, @RpcOptional addressType: Int?): Boolean {
+  fun createBond(
+    address: String,
+    @RpcDefault(BluetoothDevice.TRANSPORT_AUTO.toString(), converter = Utils.IntConverter::class)
+    transport: Int = BluetoothDevice.TRANSPORT_AUTO,
+    @RpcOptional addressType: Int? = null,
+  ): Boolean {
     return when (transport) {
       BluetoothDevice.TRANSPORT_LE ->
         bluetoothAdapter.getRemoteLeDevice(
@@ -305,10 +308,11 @@ class BluetoothAdapterSnippet : Snippet {
   @Rpc(description = "Create bond to a device using out of band data")
   fun createBondOutOfBand(
     address: String,
-    transport: Int,
-    @RpcOptional addressType: Int?,
-    @RpcOptional remoteP192data: OobData?,
-    @RpcOptional remoteP256data: OobData?,
+    @RpcDefault(BluetoothDevice.TRANSPORT_AUTO.toString(), converter = Utils.IntConverter::class)
+    transport: Int = BluetoothDevice.TRANSPORT_AUTO,
+    @RpcOptional addressType: Int? = null,
+    @RpcOptional remoteP192data: OobData? = null,
+    @RpcOptional remoteP256data: OobData? = null,
   ): Boolean {
     return when (transport) {
       BluetoothDevice.TRANSPORT_LE ->

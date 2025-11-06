@@ -12,6 +12,8 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
+import contextlib
+
 from bumble import core
 from bumble import hci
 from mobly import test_runner
@@ -69,13 +71,15 @@ class LeGapTest(test_base.PerformanceTestBase):
     """Test make incoming LE connections."""
     latency_list = list[float]()
     for i in range(_DEFAULT_REPEAT_TIMES):
+      loop_stack = contextlib.AsyncExitStack()
       try:
         self.logger.info("[DUT] Start advertising")
-        await self.dut.bl4a.start_legacy_advertiser(
+        advertiser = await self.dut.bl4a.start_legacy_advertiser(
             bl4a_api.LegacyAdvertiseSettings(
                 own_address_type=_OwnAddressType.PUBLIC
             ),
         )
+        loop_stack.push(advertiser)
         with self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER) as dut_cb:
           with performance_tool.Stopwatch() as stop_watch:
             self.logger.info("[REF] Connect GATT")
@@ -111,6 +115,7 @@ class LeGapTest(test_base.PerformanceTestBase):
         self.logger.exception("Failed to make LE connection")
       finally:
         await performance_tool.cleanup_connections(self.dut, self.ref)
+        await loop_stack.aclose()
     self.record_sponge_data(
         repeat_times=_DEFAULT_REPEAT_TIMES, latency_list=latency_list
     )

@@ -64,23 +64,12 @@ class HfpAgTest(test_base.PerformanceTestBase):
     async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
       await self.ref.close()
 
-  @classmethod
-  def _default_hfp_configuration(cls) -> hfp.HfConfiguration:
-    return hfp.HfConfiguration(
-        supported_hf_features=[],
-        supported_hf_indicators=[],
-        supported_audio_codecs=[
-            _AudioCodec.CVSD,
-            _AudioCodec.MSBC,
-        ],
-    )
-
   async def pair_and_connect(self) -> None:
     with (self.dut.bl4a.register_callback(_Module.HFP_AG) as dut_cb,):
       hfp_ext.HfProtocol.setup_server(
           self.ref.device,
           sdp_handle=_HFP_SDP_HANDLE,
-          configuration=self._default_hfp_configuration(),
+          configuration=hfp_ext.make_hf_configuration(),
       )
 
       self.logger.info("[DUT] Connect and pair REF.")
@@ -178,7 +167,7 @@ class HfpAgTest(test_base.PerformanceTestBase):
 
             self.logger.info("[REF] Establish SLC.")
             ref_hfp_protocol = hfp_ext.HfProtocol(
-                dlc, self._default_hfp_configuration()
+                dlc, hfp_ext.make_hf_configuration()
             )
             async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
               await ref_hfp_protocol.initiate_slc()

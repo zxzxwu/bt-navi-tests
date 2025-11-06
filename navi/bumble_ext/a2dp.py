@@ -138,8 +138,8 @@ class A2dpCodec(constants.ShortReprEnum):
     match self:
       case A2dpCodec.AAC:
         return avdtp.MediaCodecCapabilities(
-            media_type=avdtp.AVDTP_AUDIO_MEDIA_TYPE,
-            media_codec_type=avdtp.A2DP_MPEG_2_4_AAC_CODEC_TYPE,
+            media_type=avdtp.MediaType.AUDIO,
+            media_codec_type=a2dp.CodecType.MPEG_2_4_AAC,
             media_codec_information=a2dp.AacMediaCodecInformation(
                 object_type=(
                     a2dp.AacMediaCodecInformation.ObjectType.MPEG_2_AAC_LC
@@ -158,8 +158,8 @@ class A2dpCodec(constants.ShortReprEnum):
         )
       case A2dpCodec.SBC:
         return avdtp.MediaCodecCapabilities(
-            media_type=avdtp.AVDTP_AUDIO_MEDIA_TYPE,
-            media_codec_type=avdtp.A2DP_SBC_CODEC_TYPE,
+            media_type=avdtp.MediaType.AUDIO,
+            media_codec_type=a2dp.CodecType.SBC,
             media_codec_information=a2dp.SbcMediaCodecInformation(
                 sampling_frequency=(
                     a2dp.SbcMediaCodecInformation.SamplingFrequency.SF_16000
@@ -193,8 +193,8 @@ class A2dpCodec(constants.ShortReprEnum):
         )
       case A2dpCodec.APTX:
         return avdtp.MediaCodecCapabilities(
-            media_type=avdtp.AVDTP_AUDIO_MEDIA_TYPE,
-            media_codec_type=avdtp.A2DP_NON_A2DP_CODEC_TYPE,
+            media_type=avdtp.MediaType.AUDIO,
+            media_codec_type=a2dp.CodecType.NON_A2DP,
             media_codec_information=AptxCodecInformation(
                 sample_rate=AptxSamplingRate.RATE_48000,
                 channel_mode=AptxChannelMode.STEREO,
@@ -202,8 +202,8 @@ class A2dpCodec(constants.ShortReprEnum):
         )
       case A2dpCodec.APTX_HD:
         return avdtp.MediaCodecCapabilities(
-            media_type=avdtp.AVDTP_AUDIO_MEDIA_TYPE,
-            media_codec_type=avdtp.A2DP_NON_A2DP_CODEC_TYPE,
+            media_type=avdtp.MediaType.AUDIO,
+            media_codec_type=a2dp.CodecType.NON_A2DP,
             media_codec_information=AptxHdCodecInformation(
                 sample_rate=AptxSamplingRate.RATE_48000,
                 channel_mode=AptxChannelMode.STEREO,
@@ -211,8 +211,8 @@ class A2dpCodec(constants.ShortReprEnum):
         )
       case A2dpCodec.LDAC:
         return avdtp.MediaCodecCapabilities(
-            media_type=avdtp.AVDTP_AUDIO_MEDIA_TYPE,
-            media_codec_type=avdtp.A2DP_NON_A2DP_CODEC_TYPE,
+            media_type=avdtp.MediaType.AUDIO,
+            media_codec_type=a2dp.CodecType.NON_A2DP,
             media_codec_information=LdacCodecInformation(
                 sample_rate=LdacSamplingRate.RATE_48000,
                 channel_mode=LdacChannelMode.STEREO,
@@ -220,8 +220,8 @@ class A2dpCodec(constants.ShortReprEnum):
         )
       case A2dpCodec.OPUS:
         return avdtp.MediaCodecCapabilities(
-            media_type=avdtp.AVDTP_AUDIO_MEDIA_TYPE,
-            media_codec_type=avdtp.A2DP_NON_A2DP_CODEC_TYPE,
+            media_type=avdtp.MediaType.AUDIO,
+            media_codec_type=a2dp.CodecType.NON_A2DP,
             media_codec_information=a2dp.OpusMediaCodecInformation(
                 sampling_frequency=a2dp.OpusMediaCodecInformation.SamplingFrequency.SF_48000,
                 channel_mode=a2dp.OpusMediaCodecInformation.ChannelMode.STEREO,
@@ -283,10 +283,10 @@ class A2dpCodec(constants.ShortReprEnum):
     return {
         A2dpCodec.SBC: a2dp.A2DP_SBC_CODEC_TYPE,
         A2dpCodec.AAC: a2dp.A2DP_MPEG_2_4_AAC_CODEC_TYPE,
-        A2dpCodec.APTX: a2dp.A2DP_NON_A2DP_CODEC_TYPE,
-        A2dpCodec.APTX_HD: a2dp.A2DP_NON_A2DP_CODEC_TYPE,
-        A2dpCodec.LDAC: a2dp.A2DP_NON_A2DP_CODEC_TYPE,
-        A2dpCodec.OPUS: a2dp.A2DP_NON_A2DP_CODEC_TYPE,
+        A2dpCodec.APTX: a2dp.CodecType.NON_A2DP,
+        A2dpCodec.APTX_HD: a2dp.CodecType.NON_A2DP,
+        A2dpCodec.LDAC: a2dp.CodecType.NON_A2DP,
+        A2dpCodec.OPUS: a2dp.CodecType.NON_A2DP,
     }[self]
 
 
@@ -381,14 +381,12 @@ def _endpoint_supports_codec(
   for capability in endpoint.capabilities:
     if not (
         isinstance(capability, avdtp.MediaCodecCapabilities)
-        and capability.media_type == avdtp.AVDTP_AUDIO_MEDIA_TYPE
+        and capability.media_type == avdtp.MediaType.AUDIO
         and capability.media_codec_type == codec_type
     ):
       continue
     codec_info = capability.media_codec_information
-    if not isinstance(
-        codec_info, avdtp.VendorSpecificMediaCodecInformation
-    ) or (
+    if not isinstance(codec_info, a2dp.VendorSpecificMediaCodecInformation) or (
         codec_info.vendor_id == vendor_id and codec_info.codec_id == codec_id
     ):
       return True

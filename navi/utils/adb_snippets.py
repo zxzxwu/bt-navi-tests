@@ -18,9 +18,7 @@ import contextlib
 import datetime
 import logging
 import pathlib
-import re
 import time
-from typing import cast
 
 from mobly.controllers import android_device
 from mobly.controllers.android_device_lib import adb
@@ -149,18 +147,3 @@ def enable_bluetooth(
     ])
   except android_device.adb.AdbError:
     time.sleep(1)
-
-
-def get_bluetooth_flags(
-    device: android_device.AndroidDevice,
-) -> dict[str, bool]:
-  """Get Bluetooth flags from Android device."""
-  pattern = re.compile(r'\[(■| )\]: (\w+)')
-
-  output = cast(
-      bytes,
-      device.adb.shell(
-          "dumpsys bluetooth_manager | sed -n '/🚩Flag dump:/,/^$/p'"
-      ),
-  ).decode('utf8')
-  return {match[1]: match[0] == '■' for match in pattern.findall(output)}

@@ -22,6 +22,7 @@ from mobly import test_runner
 from mobly import signals
 from typing_extensions import override
 
+from navi.bumble_ext import hfp as hfp_ext
 from navi.tests.benchmark import performance_tool
 from navi.tests.benchmark import test_base
 from navi.utils import android_constants
@@ -34,23 +35,6 @@ _HFP_AG_SDP_HANDLE = 1
 _HFP_HF_ENABLED_PROPERTY = "bluetooth.profile.hfp.hf.enabled"
 _DEFAULT_REPEAT_TIMES = 50
 _HfpState = android_constants.ConnectionState
-_DEFAULT_AG_CONFIGURATION = hfp.AgConfiguration(
-    supported_ag_features=[
-        hfp.AgFeature.ENHANCED_CALL_STATUS,
-    ],
-    supported_ag_indicators=[
-        hfp.AgIndicatorState.call(),
-        hfp.AgIndicatorState.callsetup(),
-        hfp.AgIndicatorState.service(),
-        hfp.AgIndicatorState.signal(),
-        hfp.AgIndicatorState.roam(),
-        hfp.AgIndicatorState.callheld(),
-        hfp.AgIndicatorState.battchg(),
-    ],
-    supported_hf_indicators=[],
-    supported_ag_call_hold_operations=[],
-    supported_audio_codecs=[hfp.AudioCodec.CVSD],
-)
 
 
 class HfpHfTest(test_base.PerformanceTestBase):
@@ -124,7 +108,7 @@ class HfpHfTest(test_base.PerformanceTestBase):
       2. Create bond from DUT.
       3. Wait HFP connected on DUT.(Android should autoconnect HFP as HF)
     """
-    self._setup_ag_device(_DEFAULT_AG_CONFIGURATION)
+    self._setup_ag_device(hfp_ext.make_ag_configuration())
 
     self.logger.info("[DUT] Connect and pair REF.")
     with self.dut.bl4a.register_callback(bl4a_api.Module.HFP_HF) as dut_cb:
@@ -189,7 +173,7 @@ class HfpHfTest(test_base.PerformanceTestBase):
         with self.dut.bl4a.register_callback(bl4a_api.Module.HFP_HF) as dut_cb:
           self.logger.info("[DUT] Reconnect.")
           with performance_tool.Stopwatch() as stop_watch:
-            await self._connect_hfp_from_ref(_DEFAULT_AG_CONFIGURATION)
+            await self._connect_hfp_from_ref(hfp_ext.make_ag_configuration())
             self.logger.info("[DUT] Wait for HFP connected.")
             await self._wait_for_hfp_state(dut_cb, _HfpState.CONNECTED)
           latency_seconds = stop_watch.elapsed_time.total_seconds()
