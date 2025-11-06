@@ -29,7 +29,6 @@ from bumble import l2cap
 from bumble import pairing
 from bumble import smp
 from mobly import test_runner
-from typing_extensions import override
 
 from navi.tests import navi_test_base
 from navi.utils import android_constants
@@ -71,10 +70,6 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
   """Tests related to Bluetooth Classic pairing."""
 
   pairing_delegate: pairing_utils.PairingDelegate
-
-  @override
-  async def async_setup_test(self) -> None:
-    await super().async_setup_test()
 
   async def _test_ssp_pairing_async(
       self,
@@ -514,6 +509,9 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
       6. Set pairing PIN on DUT.
       7. Verify final states.
     """
+    self.ref.device.classic_sc_enabled = False
+    self.ref.device.classic_ssp_enabled = False
+    await self.ref.device.power_on()
 
     dut_cb = self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER)
     self.test_case_context.push(dut_cb)
@@ -530,11 +528,6 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
       return pairing.PairingConfig(delegate=pairing_delegate)
 
     self.ref.device.pairing_config_factory = pairing_config_factory
-
-    self.logger.info("[REF] Disable SSP on REF.")
-    await self.ref.device.send_command(
-        hci.HCI_Write_Simple_Pairing_Mode_Command(simple_pairing_mode=0)
-    )
 
     self.logger.info("[REF] Connect to DUT.")
     ref_dut = await self.ref.device.connect(
@@ -610,6 +603,11 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
       ref_cod: Class of Device code of REF.
     """
 
+    self.logger.info("[REF] Set CoD to %s.", ref_cod)
+    self.ref.device.class_of_device = ref_cod
+    self.ref.device.classic_sc_enabled = False
+    self.ref.device.classic_ssp_enabled = False
+    await self.ref.device.power_on()
     dut_cb = self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER)
     self.test_case_context.push(dut_cb)
     ref_addr = str(self.ref.address)
@@ -631,16 +629,6 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
       return pairing.PairingConfig(delegate=pairing_delegate)
 
     self.ref.device.pairing_config_factory = pairing_config_factory
-
-    self.logger.info("[REF] Set CoD.")
-    await self.ref.device.send_command(
-        hci.HCI_Write_Class_Of_Device_Command(class_of_device=ref_cod)
-    )
-
-    self.logger.info("[REF] Disable SSP on REF.")
-    await self.ref.device.send_command(
-        hci.HCI_Write_Simple_Pairing_Mode_Command(simple_pairing_mode=0)
-    )
 
     self.logger.info("[DUT] Search for REF to update CoD.")
     self.dut.bt.startInquiry()

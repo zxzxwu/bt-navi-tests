@@ -94,6 +94,7 @@ class AvrcpDelegate(avrcp.Delegate):
 
 
 class A2dpTest(test_base.PerformanceTestBase):
+
   def _setup_a2dp_device(
       self, codecs: list[_A2dpCodec]
   ) -> tuple[avdtp.Listener, avrcp.Protocol]:
@@ -349,12 +350,12 @@ class A2dpTest(test_base.PerformanceTestBase):
       if status == _A2dpStreamState.STOP:
         self.logger.info("[REF] Wait for A2DP stopped.")
         await ref_sink.condition.wait_for(
-            lambda: ref_sink.stream_state != avdtp.AVDTP_STREAMING_STATE
+            lambda: ref_sink.stream_state != avdtp.State.STREAMING
         )
       elif status == _A2dpStreamState.START:
         self.logger.info("[REF] Wait for A2DP started.")
         await ref_sink.condition.wait_for(
-            lambda: ref_sink.stream_state == avdtp.AVDTP_STREAMING_STATE
+            lambda: ref_sink.stream_state == avdtp.State.STREAMING
         )
 
   async def test_stream_start(self) -> None:
@@ -387,9 +388,7 @@ class A2dpTest(test_base.PerformanceTestBase):
       try:
         # Register the sink buffer to receive the packets.
         buffer = a2dp_ext.register_sink_buffer(ref_sink.impl, codec)
-        with (
-            performance_tool.Stopwatch() as stop_watch_for_start_stream,
-        ):
+        with performance_tool.Stopwatch() as stop_watch_for_start_stream:
           self.logger.info("[DUT] Start stream.")
           self.dut.bt.audioPlaySine()
           await self.wait_for_a2dp_status(ref_sink, _A2dpStreamState.START)
@@ -402,10 +401,7 @@ class A2dpTest(test_base.PerformanceTestBase):
         self.dut.bt.audioPause()
         await self.wait_for_a2dp_status(ref_sink, _A2dpStreamState.STOP)
 
-        if (
-            buffer is not None
-            and audio.SUPPORT_AUDIO_PROCESSING
-        ):
+        if buffer is not None and audio.SUPPORT_AUDIO_PROCESSING:
           dominant_frequency = audio.get_dominant_frequency(
               buffer, format=codec.format
           )
