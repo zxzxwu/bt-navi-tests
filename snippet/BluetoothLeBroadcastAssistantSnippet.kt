@@ -115,6 +115,24 @@ class BluetoothLeBroadcastAssistantSnippet : Snippet {
         putInt(SnippetConstants.FIELD_BROADCAST_ID, state.broadcastId)
       }
     }
+
+    override fun onSourceAdded(sink: BluetoothDevice, sourceId: Int, reason: Int) {
+      Log.d(TAG, "onSourceAdded: $sink, $sourceId, $reason")
+      postSnippetEvent(callbackId, SnippetConstants.BASS_SOURCE_ADDED) {
+        putString(SnippetConstants.FIELD_SINK_DEVICE, sink.address)
+        putInt(SnippetConstants.FIELD_SOURCE_ID, sourceId)
+        putInt(SnippetConstants.FIELD_REASON, reason)
+      }
+    }
+
+    override fun onSourceRemoved(sink: BluetoothDevice, sourceId: Int, reason: Int) {
+      Log.d(TAG, "onSourceRemoved: $sink, $sourceId, $reason")
+      postSnippetEvent(callbackId, SnippetConstants.BASS_SOURCE_REMOVED) {
+        putString(SnippetConstants.FIELD_SINK_DEVICE, sink.address)
+        putInt(SnippetConstants.FIELD_SOURCE_ID, sourceId)
+        putInt(SnippetConstants.FIELD_REASON, reason)
+      }
+    }
   }
 
   /** Registers BASS profile callbacks with [callbackId]. */

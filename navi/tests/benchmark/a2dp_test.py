@@ -21,7 +21,6 @@ from bumble import avdtp
 from bumble import avrcp
 from bumble import core
 from mobly import test_runner
-from typing_extensions import override
 
 from navi.bumble_ext import a2dp as a2dp_ext
 from navi.bumble_ext import avrcp as avrcp_ext
@@ -86,7 +85,6 @@ class AvrcpDelegate(avrcp.Delegate):
     super().__init__(supported_events)
     self.condition = asyncio.Condition()
 
-  @override
   async def set_absolute_volume(self, volume: int) -> None:
     await super().set_absolute_volume(volume)
     async with self.condition:

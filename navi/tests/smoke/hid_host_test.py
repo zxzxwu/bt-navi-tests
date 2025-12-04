@@ -15,13 +15,14 @@
 """Tests for HID over GATT Profile(GATT) implementation on Android."""
 
 import asyncio
+import contextlib
 import struct
+from typing import override
 
 from bumble import core
 from bumble import hci
 from mobly import test_runner
 from mobly import signals
-from typing_extensions import override
 
 from navi.bumble_ext import hid
 from navi.tests import navi_test_base
@@ -29,16 +30,41 @@ from navi.utils import android_constants
 from navi.utils import bl4a_api
 from navi.utils import constants
 
+
 _DEFAULT_STEP_TIMEOUT_SECONDS = 10.0
 _PREPARE_INPUT_ACTIVITY_TIMEOUT_SECONDS = 0.5
+_VIDEO_SERVICE_NAME = "video"
+
+
+class Delegate(hid.Device.Delegate):
+  """Delegate for HID device."""
+
+  _report_data: dict[tuple[hid.ReportType, int], bytes]
+
+  def __init__(
+      self,
+      report_data: dict[tuple[hid.ReportType, int], bytes] | None = None,
+  ) -> None:
+    super().__init__()
+    self._report_data = report_data if report_data is not None else {}
+
+  @override
+  def set_report(self, report_type: hid.ReportType, data: bytes) -> None:
+    self._report_data[(report_type, int(data[0]))] = data[1:]
+
+  @override
+  def get_report(
+      self, report_type: hid.ReportType, report_id: int | None = None
+  ) -> bytes:
+    return self._report_data[(report_type, report_id)] if report_id else b"\x00"
 
 
 class HidHostTest(navi_test_base.TwoDevicesTestBase):
-  ref_hid_server: hid.Server[hid.DeviceProtocol]
-  ref_hid_device: hid.DeviceProtocol
+  ref_hid_device: hid.Device
 
   def _setup_hid_service(self) -> None:
-    self.ref_hid_server = hid.Server(self.ref.device, hid.DeviceProtocol)
+    delegate = Delegate()
+    self.ref_hid_device = hid.Device(self.ref.device, delegate=delegate)
     self.ref.device.sdp_service_records = {
         1: hid.make_device_sdp_record(1, hid.DEFAULT_REPORT_MAP)
     }
@@ -85,10 +111,6 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
           ),
       )
 
-      self.logger.info("[REF] Wait for HID connected")
-      async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
-        self.ref_hid_device = await self.ref_hid_server.wait_connection()
-
   async def test_reconnect(self) -> None:
     """Tests reconnecting the HID connection with the background scanner.
 
@@ -128,7 +150,7 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
         await ref_dut_acl.encrypt()
 
       self.logger.info("[REF] Connect HID")
-      self.ref_hid_device = await hid.DeviceProtocol.connect(ref_dut_acl)
+      await self.ref_hid_device.connect(ref_dut_acl)
 
       self.logger.info("[DUT] Wait for connected")
       await dut_hid_cb.wait_for_event(
@@ -160,7 +182,7 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
       hid_key_code = constants.UsbHidKeyCode(hid_key)
       android_key_code = android_constants.KeyCode[hid_key_code.name]
       self.logger.info("[REF] Press HID key %s", hid_key_code.name)
-      self.ref_hid_device.send_data(
+      self.ref_hid_device.send_interrupt_data(
           bytes([0x01, 0x00, 0x00, hid_key, 0x00, 0x00, 0x00, 0x00, 0x00])
       )
       self.logger.info("[DUT] Wait for key %s down", android_key_code.name)
@@ -171,7 +193,7 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
       )
 
       self.logger.info("[REF] Release HID key %s", hid_key_code.name)
-      self.ref_hid_device.send_data(
+      self.ref_hid_device.send_interrupt_data(
           bytes([0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
       )
 
@@ -186,7 +208,7 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
     """Tests the HID mouse click.
 
     Test steps:
-      1. Leverage the test_connect() to establish the connection.
+      1. Establish the HID connection between DUT and REF.
       2. Press primary button and wait for button press.
       3. Release primary button and wait for button down.
     """
@@ -200,7 +222,7 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
 
     self.logger.info("[REF] Press Primary button")
     hid_report = struct.pack("<BBhhB", 0x02, 0x01, 0, 0, 0)
-    self.ref_hid_device.send_data(hid_report)
+    self.ref_hid_device.send_interrupt_data(hid_report)
 
     self.logger.info("[DUT] Wait for button press")
     event = await dut_input_cb.wait_for_event(bl4a_api.MotionEvent)
@@ -208,7 +230,7 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
 
     self.logger.info("[REF] Release Primary button")
     hid_report = struct.pack("<BBhhB", 0x02, 0x00, 0, 0, 0)
-    self.ref_hid_device.send_data(hid_report)
+    self.ref_hid_device.send_interrupt_data(hid_report)
 
     self.logger.info("[DUT] Wait for button down")
     event = await dut_input_cb.wait_for_event(bl4a_api.MotionEvent)
@@ -220,11 +242,10 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
     """Tests the HID mouse movement.
 
     Test steps:
-      1. Leverage the test_connect() to establish the connection.
+      1. Establish the HID connection between DUT and REF.
       2. Move on X axis and wait for hover movement.
       3. Move on Y axis and wait for hover movement.
     """
-    # Leverage the test_connect() to establish the connection.
     await self.test_connect()
 
     dut_input_cb = self.dut.bl4a.register_callback(bl4a_api.Module.INPUT)
@@ -235,7 +256,7 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
 
     self.logger.info("[REF] Move on X axis")
     hid_report = struct.pack("<BBhhB", 0x02, 0, 1, 0, 0)
-    self.ref_hid_device.send_data(hid_report)
+    self.ref_hid_device.send_interrupt_data(hid_report)
 
     self.logger.info("[DUT] Wait for hover movement")
     await dut_input_cb.wait_for_event(
@@ -252,7 +273,7 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
 
     self.logger.info("[REF] Move on Y axis")
     hid_report = struct.pack("<BBhhB", 0x02, 0, 0, 1, 0)
-    self.ref_hid_device.send_data(hid_report)
+    self.ref_hid_device.send_interrupt_data(hid_report)
 
     self.logger.info("[DUT] Wait for hover movement")
     await dut_input_cb.wait_for_event(
@@ -264,6 +285,269 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
             android_constants.MotionAction.HOVER_EXIT,
         ),
     )
+
+  async def test_reconnection_when_connection_policy_change(self) -> None:
+    """Tests the reconnection when connection policy changes.
+
+    Test steps:
+      1. Establish the HID connection between DUT and REF.
+      2. Change the connection policy to forbidden.
+      3. Wait for the connection to be disconnected.
+      4. Change the connection policy to allowed.
+      5. Wait for the reconnection.
+    """
+    await self.test_connect()
+
+    self.assertEqual(
+        self.dut.bt.getHidHostConnectionPolicy(self.ref.address),
+        android_constants.ConnectionPolicy.ALLOWED,
+    )
+
+    with (
+        self.dut.bl4a.register_callback(bl4a_api.Module.HID_HOST) as dut_hid_cb,
+        self.dut.bl4a.register_callback(
+            bl4a_api.Module.ADAPTER
+        ) as dut_adapter_cb,
+    ):
+      self.logger.info("[DUT] Change connection policy to allowed")
+      self.dut.bt.setHidHostConnectionPolicy(
+          self.ref.address, android_constants.ConnectionPolicy.FORBIDDEN
+      )
+
+      self.logger.info("[DUT] Wait for connection disconnected")
+      await dut_hid_cb.wait_for_event(
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.DISCONNECTED,
+          ),
+      )
+
+      self.logger.info("[DUT] Wait for acl disconnected")
+      await dut_adapter_cb.wait_for_event(bl4a_api.AclDisconnected)
+
+      self.logger.info("[DUT] Change connection policy to allowed")
+      self.dut.bt.setHidHostConnectionPolicy(
+          self.ref.address, android_constants.ConnectionPolicy.ALLOWED
+      )
+
+      self.logger.info("[DUT] Wait for acl connected")
+      await dut_adapter_cb.wait_for_event(
+          bl4a_api.AclConnected(
+              address=self.ref.address,
+              transport=android_constants.Transport.CLASSIC,
+          )
+      )
+
+      self.logger.info("[DUT] Wait for HID connected")
+      await dut_hid_cb.wait_for_event(
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.CONNECTED,
+          ),
+      )
+
+  async def test_remove_bond(self) -> None:
+    """Tests the HID reconnection after removing the bond.
+
+    Test steps:
+      1. Establish the HID connection between DUT and REF.
+      2. Remove the bond between DUT and REF.
+      3. Wait for the connection to be disconnected.
+      4. Verify the ACL is disconnected.
+    """
+    await self.test_connect()
+
+    with (
+        self.dut.bl4a.register_callback(bl4a_api.Module.HID_HOST) as dut_hid_cb,
+        self.dut.bl4a.register_callback(
+            bl4a_api.Module.ADAPTER
+        ) as dut_adapter_cb,
+    ):
+      self.logger.info("[DUT] Remove bond")
+      self.dut.bt.removeBond(self.ref.address)
+
+      self.logger.info("[DUT] Wait for connection disconnected")
+      await dut_hid_cb.wait_for_event(
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.DISCONNECTED,
+          ),
+      )
+
+      self.logger.info("[DUT] Wait for acl disconnected")
+      await dut_adapter_cb.wait_for_event(bl4a_api.AclDisconnected)
+
+  @navi_test_base.named_parameterized(
+      dict(
+          testcase_name="from_host",
+          issuer=constants.TestRole.DUT,
+      ),
+      dict(
+          testcase_name="from_device",
+          issuer=constants.TestRole.REF,
+      ),
+  )
+  async def test_virtual_unplug(self, issuer: constants.TestRole) -> None:
+    """Tests the HID virtual unplug.
+
+    Test steps:
+      1. Establish the HID connection between DUT and REF.
+      2. Virtual unplug the HID device from the issuer.
+      3. Wait for the connection to be disconnected.
+      4. Verify the device is not bonded.
+
+    Args:
+      issuer: The device that initiates the virtual unplug.
+    """
+    self.assertEqual(self.dut.bt.getBondedDevices(), [])
+    await self.test_connect()
+
+    with (
+        self.dut.bl4a.register_callback(bl4a_api.Module.HID_HOST) as dut_hid_cb,
+        self.dut.bl4a.register_callback(
+            bl4a_api.Module.ADAPTER
+        ) as dut_adapter_cb,
+    ):
+      if issuer == constants.TestRole.DUT:
+        self.logger.info("[DUT] Virtual unplug")
+        self.dut.bt.virtualUnplug(self.ref.address)
+      else:
+        # TODO: Remove the flag once the flag is merged.
+        self.skipTest("b/460703858 - Wait for the flag to be alawys on.")
+
+        self.logger.info("[REF] Virtual unplug")
+        self.ref_hid_device.virtual_cable_unplug()
+
+      self.logger.info("[DUT] Wait for HID disconnected")
+      await dut_hid_cb.wait_for_event(
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.DISCONNECTED,
+          ),
+      )
+
+      self.logger.info("[DUT] Wait for acl disconnected")
+      await dut_adapter_cb.wait_for_event(bl4a_api.AclDisconnected)
+
+    self.logger.info("[DUT] Verify the device is not bonded")
+    self.assertEqual(self.dut.bt.getBondedDevices(), [])
+
+  async def test_set_and_get_report(self) -> None:
+    """Tests the HID set report.
+
+    Test steps:
+      1. Establish the HID connection between DUT and REF.
+      2. Set the report with report type INPUT_REPORT and report ID 1.
+      3. Verify the report is set successfully.
+      4. Get the report with report type INPUT_REPORT and report ID 1.
+      5. Verify the report is get successfully.
+    """
+    await self.test_connect()
+
+    report_id = 1
+    data = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09]
+
+    with self.dut.bl4a.register_callback(
+        bl4a_api.Module.HID_HOST
+    ) as dut_hid_cb:
+      self.logger.info(
+          "[DUT] Set the report with report type %s",
+          hid.ReportType.INPUT_REPORT,
+      )
+      self.dut.bt.setHidHostReport(
+          self.ref.address,
+          hid.ReportType.INPUT_REPORT,
+          bytes([report_id] + data).hex(),
+      )
+
+      self.logger.info("[DUT] Verify the report is set successfully")
+      await dut_hid_cb.wait_for_event(
+          bl4a_api.HidHostHandshake(
+              address=self.ref.address,
+              status=hid.HandshakeMessage.ResultCode.SUCCESSFUL,
+          )
+      )
+
+      self.logger.info("[DUT] Get the report with report ID 1")
+      self.dut.bt.getHidHostReport(
+          self.ref.address, hid.ReportType.INPUT_REPORT, 1, 0
+      )
+
+      self.logger.info("[DUT] Wait for the report with report ID 1")
+      event = await dut_hid_cb.wait_for_event(
+          bl4a_api.HidHostReport
+      )
+
+      self.logger.info("[DUT] Verify the report is correct")
+      self.assertEqual(event.address, self.ref.address)
+      self.assertSequenceEqual(event.report, bytes([report_id] + data))
+
+  async def test_send_data(self) -> None:
+    """Tests the HID send data.
+
+    Test steps:
+      1. Establish the HID connection between DUT and REF.
+      2. Send the data to the HID device.
+      3. Verify the data is received correctly.
+    """
+    await self.test_connect()
+
+    report_queue = asyncio.Queue[tuple[hid.ReportType, bytes]]()
+    def on_interrupt_pdu(report_type: hid.ReportType, data: bytes) -> None:
+      report_queue.put_nowait((report_type, data))
+    self.ref_hid_device.on(
+        hid.HID.EVENT_INTERRUPT_DATA, on_interrupt_pdu
+    )
+
+    self.logger.info(
+        "[DUT] Send the report with report type %s",
+    )
+    data = bytes([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09])
+    self.dut.bt.sendHidHostData(
+        self.ref.address, data.hex()
+    )
+
+    self.logger.info("[REF] Check report")
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      report = await report_queue.get()
+    self.assertEqual(report[0], hid.ReportType.OUTPUT_REPORT)
+    self.assertSequenceEqual(report[1], data)
+
+  async def test_set_idle_time(self) -> None:
+    """Tests the HID set idle time.
+
+    Test steps:
+      1. Establish the HID connection between DUT and REF.
+      2. Set the idle time to 500ms.
+      3. Wait for the idle time changed.
+      4. Get the idle time.
+      5. Verify the idle time is correctly set.
+    """
+    await self.test_connect()
+
+    with self.dut.bl4a.register_callback(
+        bl4a_api.Module.HID_HOST
+    ) as dut_hid_cb:
+      idle_time = 125
+      idle_time_ms = idle_time * 4
+      self.logger.info("[DUT] Set the idle time to %sms", idle_time_ms)
+      self.dut.bt.setHidHostIdleTime(self.ref.address, idle_time)
+
+      # Since setHidHostIdleTime does not trigger handshake event, we wait for a
+      # short period for setHidHostIdleTime to complete.
+      self.logger.info("[DUT] Wait for the idle time changed")
+      await asyncio.sleep(0.5)
+
+      self.logger.info("[DUT] Get the idle time")
+      self.dut.bt.getHidHostIdleTime(self.ref.address)
+
+      self.logger.info("[DUT] Verify the idle time is %sms", idle_time_ms)
+      await dut_hid_cb.wait_for_event(
+          bl4a_api.HidHostIdleTimeChanged(
+              address=self.ref.address,
+              idle_time=idle_time,
+          )
+      )
 
 
 if __name__ == "__main__":

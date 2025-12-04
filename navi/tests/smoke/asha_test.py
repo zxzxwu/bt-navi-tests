@@ -37,12 +37,8 @@ _DEFAULT_TIMEOUT_SECONDS = 10.0
 _DEFAULT_ADVERTISING_INTERVAL = 100
 _STREAMING_TIME_SECONDS = 1.0
 
-# ASHA Volume Constants (dB attenuation, 0 is max)
-_ASHA_VOLUME_MAX = 0
-# ASHA minimum volume for music stream type (-128 dB)
-_ASHA_VOLUME_MUSIC_MIN = -128
-# ASHA minimum volume for call stream type (-127 dB)
-_ASHA_VOLUME_CALL_MIN = -127
+_ASHA_MIN_VOLUME = -128
+_ASHA_MAX_VOLUME = 0
 
 
 class AshaTest(navi_test_base.TwoDevicesTestBase):
@@ -191,10 +187,7 @@ class AshaTest(navi_test_base.TwoDevicesTestBase):
         self.logger.info("[REF] Wait for audio stopped")
         await stop_events.get()
 
-      if (
-          self.user_params.get(navi_test_base.RECORD_FULL_DATA)
-          and sink_buffer
-      ):
+      if self.user_params.get(navi_test_base.RECORD_FULL_DATA) and sink_buffer:
         self.write_test_output_data(
             "asha_data.g722",
             sink_buffer,
@@ -209,60 +202,30 @@ class AshaTest(navi_test_base.TwoDevicesTestBase):
         if not self.dut.device.is_emulator:
           self.assertAlmostEqual(dominant_frequency, 1000, delta=10)
 
-  @navi_test_base.named_parameterized(
-      music=(android_constants.StreamType.MUSIC, _ASHA_VOLUME_MUSIC_MIN),
-      call=(android_constants.StreamType.CALL, _ASHA_VOLUME_CALL_MIN),
-  )
-  async def test_set_volume(
-      self,
-      stream_type: android_constants.StreamType,
-      min_volume_target: int,
-  ) -> None:
+  async def test_set_volume(self) -> None:
     """Tests ASHA set volume.
 
     Test steps:
       1. Establish ASHA connection.
-      2. If call stream, start a call.
-      3. Set volume to max and verify volume changed to _ASHA_VOLUME_MAX.
-      4. Set volume to min and verify volume changed to min_volume_target.
-      5. Set volume to max and verify volume changed to _ASHA_VOLUME_MAX.
-
-    Args:
-      stream_type: The stream type to cycle volume for.
-      min_volume_target: The expected volume target for min volume.
+      2. Set volume to value from min to max.
+      3. Verify volume is propagated to REF.
     """
     await self._setup_paired_devices()
 
-    with contextlib.ExitStack() as exit_stack:
-      if stream_type == android_constants.StreamType.CALL:
-        self.logger.info("[DUT] Start phone call")
-        call_context = self.dut.bl4a.make_phone_call(
-            caller_name="Pixel Bluetooth",
-            caller_number="123456789",
-            direction=constants.Direction.OUTGOING,
-        )
-        exit_stack.enter_context(call_context)
-        await asyncio.to_thread(call_context.answer)
+    ref_volumes = pyee_extensions.EventTriggeredValueObserver(
+        self.ref_asha_service,
+        asha.AshaService.Event.VOLUME_CHANGED,
+        lambda: self.ref_asha_service.volume,
+    )
 
-      volumes = pyee_extensions.EventTriggeredValueObserver(
-          self.ref_asha_service,
-          asha.AshaService.Event.VOLUME_CHANGED,
-          lambda: self.ref_asha_service.volume,
-      )
-      for volume, target, name in [
-          (self.dut.bt.getMaxVolume(stream_type), _ASHA_VOLUME_MAX, "max"),
-          (self.dut.bt.getMinVolume(stream_type), min_volume_target, "min"),
-          (self.dut.bt.getMaxVolume(stream_type), _ASHA_VOLUME_MAX, "max"),
-      ]:
-        async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):
-          self.logger.info(
-              "[DUT] Set volume to %s for stream %s",
-              name,
-              stream_type.name,
-          )
-          self.dut.bt.setVolume(stream_type, volume)
-          self.logger.info("[REF] Wait for volume to be %s (%d)", name, target)
-          await volumes.wait_for_target_value(target)
+    for volume in range(_ASHA_MIN_VOLUME, _ASHA_MAX_VOLUME + 1):
+
+      async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):
+        self.logger.info("[DUT] Set volume to %s", volume)
+        self.dut.bt.setAshaVolume(volume)
+
+        self.logger.info("[REF] Wait for volume to be %s", volume)
+        await ref_volumes.wait_for_target_value(volume)
 
 
 if __name__ == "__main__":

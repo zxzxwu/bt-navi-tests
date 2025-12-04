@@ -89,7 +89,12 @@ class BluetoothAdapterSnippet : Snippet {
         }
       },
       IntentFilter(BluetoothAdapter.ACTION_BLE_STATE_CHANGED),
+      Context.RECEIVER_EXPORTED,
     )
+  }
+
+  private fun getDevice(address: String): BluetoothDevice {
+    return bluetoothAdapter.getRemoteDevice(address)
   }
 
   /** Resets Bluetooth, waits for auto-restart, and returns whether everything succeeds. */
@@ -162,8 +167,8 @@ class BluetoothAdapterSnippet : Snippet {
   }
 
   /** Creates a [BroadcastReceiver] which redirects intents to the event queue of [callbackId]. */
-  @AsyncRpc(description = "Setup callbacks")
-  fun adapterSetup(callbackId: String) {
+  @AsyncRpc(description = "Register adapter callback")
+  fun registerAdapterCallback(callbackId: String) {
     val intentFilter =
       IntentFilter().apply {
         addAction(BluetoothDevice.ACTION_PAIRING_REQUEST)
@@ -242,13 +247,23 @@ class BluetoothAdapterSnippet : Snippet {
           }
         }
       }
-    context.registerReceiver(broadcastReceivers[callbackId], intentFilter)
+    context.registerReceiver(
+      broadcastReceivers[callbackId],
+      intentFilter,
+      Context.RECEIVER_EXPORTED,
+    )
   }
 
   /** Removes a [BroadcastReceiver] of [callbackId]. */
-  @Rpc(description = "Teardown callbacks")
-  fun adapterTeardown(callbackId: String) {
-    broadcastReceivers.remove(callbackId)?.let { context.unregisterReceiver(it) }
+  @Rpc(description = "Unregister an adapter callback")
+  fun unregisterAdapterCallback(callbackId: String) {
+    broadcastReceivers.remove(callbackId)?.let {
+      try {
+        context.unregisterReceiver(it)
+      } catch (e: IllegalArgumentException) {
+        Log.w(TAG, "Receiver for $callbackId not registered.")
+      }
+    }
   }
 
   /** Returns addresses of bonded devices. */
@@ -407,6 +422,41 @@ class BluetoothAdapterSnippet : Snippet {
   @Rpc(description = "Set Bluetooth Pairing PIN code")
   fun setPin(address: String, pin: String): Boolean =
     bluetoothAdapter.getRemoteDevice(address).setPin(pin)
+
+  /**
+   * Triggers service discovery on the given device to fetch UUIDs. Listen for the results using
+   * [registerAdapterCallback] and handling the [SnippetConstants.UUID_CHANGED] event.
+   */
+  @Rpc(description = "Triggers service discovery on the given device to fetch UUIDs.")
+  fun fetchUuidsWithSdp(address: String): Boolean {
+    @Suppress("DEPRECATION")
+    return getDevice(address).fetchUuidsWithSdp()
+  }
+
+  /**
+   * Gets the a device's Bluetooth class.
+   *
+   * @throws RuntimeException if the Bluetooth class cannot be retrieved.
+   */
+  @Rpc(description = "Gets the Bluetooth class of the device.")
+  fun getBluetoothClass(address: String): Int {
+    return getDevice(address).bluetoothClass?.deviceClass
+      ?: throw RuntimeException("Failed to get BluetoothClass for $address, API returned null.")
+  }
+
+  /**
+   * Gets the cached UUIDs from the device.
+   *
+   * @throws RuntimeException if the UUIDs cannot be retrieved.
+   */
+  @Rpc(description = "Gets the device's cached UUIDs.")
+  fun getDeviceUuids(address: String): List<String> {
+    val device = getDevice(address)
+    return device.uuids?.map { it.toString() }
+      ?: throw RuntimeException(
+        "Failed to get UUIDs for $address, API returned null (is SDP done?)."
+      )
+  }
 
   /**
    * Sets Bluetooth scan mode to [scanMode] and returns the status defined in
@@ -623,6 +673,11 @@ class BluetoothAdapterSnippet : Snippet {
   fun maxConnectedAudioDevices(): Int {
     return bluetoothAdapter.getMaxConnectedAudioDevices()
   }
+
+  /** Returns whether LE Periodic Advertising is supported. */
+  @Rpc(description = "Is LE Periodic Advertising Supported")
+  fun isLePeriodicAdvertisingSupported(): Boolean =
+    bluetoothAdapter.isLePeriodicAdvertisingSupported
 
   companion object {
     const val TAG = "BluetoothAdapterSnippet"
