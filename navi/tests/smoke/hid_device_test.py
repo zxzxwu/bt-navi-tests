@@ -16,7 +16,6 @@
 import asyncio
 import datetime
 
-from bumble import hid
 from mobly import test_runner
 from mobly import signals
 from typing_extensions import override
@@ -33,11 +32,10 @@ _DEFAULT_STEP_TIMEOUT_SECONDS = _DEFAULT_STEP_TIMEOUT.total_seconds()
 
 
 class HidDeviceTest(navi_test_base.TwoDevicesTestBase):
-  ref_hid_server: hid_ext.Server[hid_ext.HostProtocol]
-  ref_hid_host: hid_ext.HostProtocol
+  ref_hid_host: hid_ext.Host
 
   def _setup_hid_service(self) -> None:
-    self.ref_hid_server = hid_ext.Server(self.ref.device, hid_ext.HostProtocol)
+    self.ref_hid_host = hid_ext.Host(self.ref.device)
 
   @override
   async def async_setup_class(self) -> None:
@@ -72,10 +70,6 @@ class HidDeviceTest(navi_test_base.TwoDevicesTestBase):
             state=android_constants.ConnectionState.CONNECTED,
         ),
     )
-
-    self.logger.info("[REF] Wait for HID Host connected")
-    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
-      self.ref_hid_host = await self.ref_hid_server.wait_connection()
 
     return dut_hid_cb
 
@@ -133,22 +127,25 @@ class HidDeviceTest(navi_test_base.TwoDevicesTestBase):
     """
     await self._setup_connection()
 
-    report_queue = asyncio.Queue[bytes]()
-    def on_interrupt_pdu(pdu: bytes) -> None:
-      report_queue.put_nowait(pdu)
+    report_type_queue = asyncio.Queue[hid_ext.ReportType]()
+    report_data_queue = asyncio.Queue[bytes]()
+    def on_interrupt_pdu(report_type: hid_ext.ReportType, data: bytes) -> None:
+      report_type_queue.put_nowait(report_type)
+      report_data_queue.put_nowait(data)
     self.ref_hid_host.on(
-        hid_ext.DeviceProtocol.Event.INTERRUPT_DATA, on_interrupt_pdu
+        hid_ext.HID.EVENT_INTERRUPT_DATA, on_interrupt_pdu
     )
 
     self.logger.info("[DUT] Send report")
-    self.dut.bt.hidDeviceSendReport(
-        self.ref.address, 0x01, [0x00, 0x01, 0x02, 0x03]
-    )
+    data = [0x00, 0x01, 0x02, 0x03]
+    self.dut.bt.hidDeviceSendReport(self.ref.address, 0x01, data)
 
     self.logger.info("[REF] Check report")
     async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
-      report = await report_queue.get()
-    self.assertEqual(report, bytes([0xa1, 0x00, 0x01, 0x02, 0x03]))
+      report_type = await report_type_queue.get()
+      report_data = await report_data_queue.get()
+    self.assertEqual(report_type, hid_ext.ReportType.INPUT_REPORT)
+    self.assertSequenceEqual(report_data, data)
 
   async def test_reply_report(self) -> None:
     """Tests replying report data to the HID Device.
@@ -156,30 +153,34 @@ class HidDeviceTest(navi_test_base.TwoDevicesTestBase):
     Test steps:
       1. Register HID Device App on DUT.
       2. Establish the HID connection between DUT and REF.
-      3. Reply report data to the ref.
-      4. Verify the reply report is received.
+      3. Send get_report from the HID Host.
+      4. Reply report data to the ref.
+      5. Verify the reply report is received.
     """
     await self._setup_connection()
 
-    report_queue = asyncio.Queue[bytes]()
-    def on_control_pdu(pdu: bytes) -> None:
-      report_queue.put_nowait(pdu)
-    self.ref_hid_host.on(
-        hid_ext.DeviceProtocol.Event.CONTROL_DATA, on_control_pdu
+    report_id = 1
+    data = [0x00, 0x01, 0x02, 0x03]
+
+    self.logger.info("[REF] Get report")
+    get_report_task = asyncio.create_task(
+        self.ref_hid_host.get_report(
+            hid_ext.ReportType.INPUT_REPORT, report_id, 0
+        )
     )
 
     self.logger.info("[DUT] Reply report")
     self.dut.bt.hidDeviceReplyReport(
         self.ref.address,
-        hid.Message.ReportType.INPUT_REPORT,
-        0x01,
-        [0x00, 0x01, 0x02, 0x03],
+        hid_ext.ReportType.INPUT_REPORT,
+        report_id,
+        data,
     )
 
     self.logger.info("[REF] Check report")
     async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
-      report = await report_queue.get()
-    self.assertSequenceEqual(report, bytes([0xa1, 0x00, 0x01, 0x02, 0x03]))
+      report = await get_report_task
+      self.assertEqual(report, bytes(data))
 
   async def test_report_error(self) -> None:
     """Tests reporting error data to the HID Device.
@@ -192,25 +193,26 @@ class HidDeviceTest(navi_test_base.TwoDevicesTestBase):
     """
     await self._setup_connection()
 
-    report_queue = asyncio.Queue[bytes]()
+    report_id = 1
 
-    def on_handshake_pdu(pdu: bytes) -> None:
-      report_queue.put_nowait(pdu)
-
-    self.ref_hid_host.on(
-        hid_ext.DeviceProtocol.Event.HANDSHAKE, on_handshake_pdu
+    self.logger.info("[REF] Get report")
+    get_report_task = asyncio.create_task(
+        self.ref_hid_host.get_report(
+            hid_ext.ReportType.INPUT_REPORT, report_id, 0
+        )
     )
 
     self.logger.info("[DUT] Report error")
     self.dut.bt.hidDeviceReportError(
-        self.ref.address, hid.Message.Handshake.NOT_READY
+        self.ref.address, hid_ext.HandshakeMessage.ResultCode.NOT_READY
     )
 
-    self.logger.info("[REF] Check error")
-    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
-      report = await report_queue.get()
-    self.assertEqual(report, hid.Message.Handshake.NOT_READY)
-
+    with self.assertRaises(hid_ext.HidProtocolError) as control_message:
+      await get_report_task
+    self.assertEqual(
+        control_message.exception.result_code,
+        hid_ext.HandshakeMessage.ResultCode.NOT_READY
+    )
 
 if __name__ == "__main__":
   test_runner.main()

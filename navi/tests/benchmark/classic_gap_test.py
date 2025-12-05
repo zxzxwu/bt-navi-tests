@@ -147,7 +147,7 @@ class ClassicGapTest(test_base.PerformanceTestBase):
               bl4a_api.Module.ADAPTER
           ) as dut_cb:
             self.logger.info("[DUT] Create RFCOMM channel.")
-            future = self.dut.bl4a.create_rfcomm_channel_async(
+            rfcomm_socket = self.dut.bl4a.create_rfcomm_channel_async(
                 address=self.ref.address,
                 secure=True,
                 uuid=_RFCOMM_UUID,
@@ -161,7 +161,8 @@ class ClassicGapTest(test_base.PerformanceTestBase):
                 timeout=datetime.timedelta(seconds=30),
             )
             latency_seconds = stop_watch.elapsed_time.total_seconds()
-            await future
+            async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+              await rfcomm_socket.wait_for_connected()
         self.success_attempt_record(
             test_round=i + 1, latency=latency_seconds, latency_list=latency_list
         )

@@ -28,6 +28,7 @@ import re
 import secrets
 import sys
 from typing import Any, ClassVar, Never, TypeAlias, TypeVar, cast, final
+import uuid
 
 from absl.testing import absltest
 from bumble import pairing
@@ -783,6 +784,8 @@ class AndroidBumbleTestBase(BaseTestBase):
           classic_interlaced_scan_enabled=True,
           # Enable Address resolution fffloading for Bumble devices.
           address_resolution_offload=True,
+          # Enable LE subrating for Bumble devices.
+          le_subrate_enabled=True,
           # Set a random IRK.
           irk=secrets.token_bytes(16),
           # Set a random static address.
@@ -874,32 +877,41 @@ class AndroidBumbleTestBase(BaseTestBase):
       f.write(data)
 
   def _get_btsnoop_and_dumpsys(self) -> None:
-    adb_snippets.download_btsnoop(
-        device=self.dut.device,
-        destination_base_path=self.current_test_info.output_path,
-    )
-    adb_snippets.cleanup_btsnoop(device=self.dut.device)
-    adb_snippets.download_dumpsys(
-        device=self.dut.device,
-        destination_base_path=self.current_test_info.output_path,
-    )
-    for ref in self._refs:
-      address_str = ref.address.replace(":", "-")
-      with open(
-          pathlib.Path(
-              self.current_test_info.output_path,
-              f"bumble_{address_str}_btsnoop.log",
-          ),
-          "wb",
-      ) as f:
-        f.write(ref.snoop_buffer.getbuffer())
-      if isinstance(ref.adapter, crown.AndroidCrownAdapter):
-        adb_snippets.download_btsnoop(
-            device=ref.adapter.ad,
-            destination_base_path=self.current_test_info.output_path,
-            filename_prefix="bumble",
+    try:
+      adb_snippets.download_btsnoop(
+          device=self.dut.device,
+          destination_base_path=self.current_test_info.output_path,
+      )
+      adb_snippets.cleanup_btsnoop(device=self.dut.device)
+      adb_snippets.download_dumpsys(
+          device=self.dut.device,
+          destination_base_path=self.current_test_info.output_path,
+      )
+      for ref in self._refs:
+        address_str = ref.address.replace(":", "-")
+        with open(
+            pathlib.Path(
+                self.current_test_info.output_path,
+                f"bumble_{address_str}_btsnoop.log",
+            ),
+            "wb",
+        ) as f:
+          f.write(ref.snoop_buffer.getbuffer())
+        if isinstance(ref.adapter, crown.AndroidCrownAdapter):
+          adb_snippets.download_btsnoop(
+              device=ref.adapter.ad,
+              destination_base_path=self.current_test_info.output_path,
+              filename_prefix="bumble",
+          )
+          adb_snippets.cleanup_btsnoop(device=ref.adapter.ad)
+    except (adb.Error, FileNotFoundError):
+      if sys.platform == "win32":
+        self.logger.exception(
+            "Failed to get btsnoop and dumpsys, probably because the file path"
+            " is too long (Windows limit is 260 characters)"
         )
-        adb_snippets.cleanup_btsnoop(device=ref.adapter.ad)
+      else:
+        self.logger.exception("Failed to get btsnoop and dumpsys")
 
   @retry_lib.retry_on_exception()
   @override
@@ -938,11 +950,15 @@ class AndroidBumbleTestBase(BaseTestBase):
     with contextlib.suppress(adb.AdbError):
       self.dut.adb.shell("rm /data/misc/bluetooth/gatt_*")
 
-    # Reset DUT first, because if REF is reset first, DUT may try to reconnect
-    # or perform other stack behavior which may break the test flow.
-    self.dut.bt.factoryReset()
+    # Remove all bonded devices first to avoid reconnection.
+    for bonded_device in self.dut.bt.getBondedDevices():
+      self.dut.bt.removeBond(bonded_device)
+
     async with self.assert_not_timeout(_SETUP_TIMEOUT_SECONDS):
-      await asyncio.gather(*[ref.reset() for ref in self._refs])
+      await asyncio.gather(
+          asyncio.to_thread(self.dut.bt.factoryReset),
+          *[ref.reset() for ref in self._refs],
+      )
 
     # Make sure Bluetooth is enabled after factory reset.
     self.assertTrue(self.dut.bt.enable())
@@ -1174,15 +1190,36 @@ class AndroidBumbleTestBase(BaseTestBase):
             )
         )
       else:
+        service_uuid = str(uuid.uuid4())
         advertiser = await self.dut.bl4a.start_legacy_advertiser(
             bl4a_api.LegacyAdvertiseSettings(
-                own_address_type=android_constants.AddressTypeStatus.PUBLIC,
+                own_address_type=android_constants.AddressTypeStatus.RANDOM,
                 connectable=True,
-            )
+            ),
+            advertising_data=bl4a_api.AdvertisingData(
+                service_uuids=[service_uuid]
+            ),
         )
         with advertiser:
+          advertisements = asyncio.Queue[bumble.device.Advertisement]()
+
+          @ref.device.on(ref.device.EVENT_ADVERTISEMENT)
+          def _(advertisement: bumble.device.Advertisement) -> None:
+            if (
+                service_uuids := advertisement.data.get(
+                    bumble.core.AdvertisingData.Type.COMPLETE_LIST_OF_128_BIT_SERVICE_CLASS_UUIDS
+                )
+            ) and (service_uuid in service_uuids):
+              advertisements.put_nowait(advertisement)
+
+          self.logger.info("[REF] Start scanning.")
+          await ref.device.start_scanning()
+          self.logger.info("[REF] Wait for finding DUT.")
+          advertisement = await advertisements.get()
+          self.logger.info("[REF] Stop scanning.")
+          await ref.device.stop_scanning()
           ref_dut_acl = await ref.device.connect(
-              f"{self.dut.address}/P",
+              advertisement.address,
               transport=bumble.core.PhysicalTransport.LE,
               own_address_type=ref_address_type,
               timeout=_SETUP_TIMEOUT_SECONDS,

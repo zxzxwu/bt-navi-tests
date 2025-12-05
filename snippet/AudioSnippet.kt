@@ -105,7 +105,7 @@ class AudioSnippet : Snippet {
           for (addedDevice in addedDevices) {
             postSnippetEvent(callbackId, SnippetConstants.AUDIO_DEVICE_ADDED) {
               putString(SnippetConstants.FIELD_DEVICE, addedDevice.address)
-              putInt(SnippetConstants.FIELD_TRANSPORT, addedDevice.type)
+              putInt(SnippetConstants.FIELD_TYPE, addedDevice.type)
             }
           }
         }
@@ -114,7 +114,7 @@ class AudioSnippet : Snippet {
           for (removedDevice in removedDevices) {
             postSnippetEvent(callbackId, SnippetConstants.AUDIO_DEVICE_REMOVED) {
               putString(SnippetConstants.FIELD_DEVICE, removedDevice.address)
-              putInt(SnippetConstants.FIELD_TRANSPORT, removedDevice.type)
+              putInt(SnippetConstants.FIELD_TYPE, removedDevice.type)
             }
           }
         }
@@ -129,7 +129,7 @@ class AudioSnippet : Snippet {
           }
           postSnippetEvent(callbackId, SnippetConstants.AUDIO_COMMUNICATION_DEVICE_CHANGED) {
             putString(SnippetConstants.FIELD_DEVICE, device.address)
-            putInt(SnippetConstants.FIELD_TRANSPORT, device.type)
+            putInt(SnippetConstants.FIELD_TYPE, device.type)
           }
         }
       }
@@ -280,6 +280,22 @@ class AudioSnippet : Snippet {
       Uri.Builder()
         .scheme(ContentResolver.SCHEME_ANDROID_RESOURCE)
         .path(R.raw.sine1000hz.toString())
+        .build()
+    player.setMediaItem(MediaItem.fromUri(fileUri))
+    player.prepare()
+    player.play()
+  }
+
+  /** Plays 1000Hz sine wave with surround sound. */
+  @Rpc(description = "Play 1000Hz sine wave with surround sound (5.1 channels).")
+  @RunOnUiThread
+  fun playSineSurrounded(@RpcOptional playerId: String? = null) {
+    val player =
+      players[playerId] ?: throw IllegalArgumentException("$playerId is not a valid player")
+    val fileUri =
+      Uri.Builder()
+        .scheme(ContentResolver.SCHEME_ANDROID_RESOURCE)
+        .path(R.raw.sine1000hz_5_1_ch.toString())
         .build()
     player.setMediaItem(MediaItem.fromUri(fileUri))
     player.prepare()

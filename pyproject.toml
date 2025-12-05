@@ -8,7 +8,7 @@ version = "0.1.0"
 authors = [
     { name = "Google", email = "pixel-bluetooth-testing-dev@google.com" },
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "bumble==0.0.219",
     "mobly",

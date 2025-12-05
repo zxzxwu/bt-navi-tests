@@ -15,6 +15,7 @@
 """Tests for HID over GATT Profile(GATT) implementation on Android."""
 
 import asyncio
+import contextlib
 import struct
 
 from bumble import gatt
@@ -28,6 +29,8 @@ from navi.tests import navi_test_base
 from navi.utils import android_constants
 from navi.utils import bl4a_api
 from navi.utils import constants
+
+_VIDEO_SERVICE_NAME = "video"
 
 
 class HogpTest(navi_test_base.TwoDevicesTestBase):
@@ -48,7 +51,7 @@ class HogpTest(navi_test_base.TwoDevicesTestBase):
             gatt.Descriptor(
                 gatt.GATT_REPORT_REFERENCE_DESCRIPTOR,
                 gatt.Descriptor.READABLE,
-                bytes([0x01, hid.ReportType.INPUT.value]),
+                bytes([0x01, hid.ReportType.INPUT_REPORT.value]),
             )
         ],
     )
@@ -64,7 +67,7 @@ class HogpTest(navi_test_base.TwoDevicesTestBase):
             gatt.Descriptor(
                 gatt.GATT_REPORT_REFERENCE_DESCRIPTOR,
                 gatt.Descriptor.READABLE,
-                bytes([0x01, hid.ReportType.OUTPUT.value]),
+                bytes([0x01, hid.ReportType.OUTPUT_REPORT.value]),
             )
         ],
     )
@@ -79,7 +82,7 @@ class HogpTest(navi_test_base.TwoDevicesTestBase):
             gatt.Descriptor(
                 gatt.GATT_REPORT_REFERENCE_DESCRIPTOR,
                 gatt.Descriptor.READABLE,
-                bytes([0x02, hid.ReportType.INPUT.value]),
+                bytes([0x02, hid.ReportType.INPUT_REPORT.value]),
             )
         ],
     )
@@ -90,7 +93,7 @@ class HogpTest(navi_test_base.TwoDevicesTestBase):
                 gatt.GATT_PROTOCOL_MODE_CHARACTERISTIC,
                 gatt.Characteristic.Properties.READ,
                 gatt.Characteristic.READABLE,
-                bytes([hid.ReportProtocol.REPORT.value]),
+                bytes([hid.ProtocolMode.REPORT_PROTOCOL.value]),
             ),
             gatt.Characteristic(
                 gatt.GATT_HID_INFORMATION_CHARACTERISTIC,

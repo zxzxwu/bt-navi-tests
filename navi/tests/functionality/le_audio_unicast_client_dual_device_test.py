@@ -28,7 +28,6 @@ from bumble import gatt
 from bumble import gatt_client
 from bumble import hci
 from bumble import pairing
-from bumble.profiles import ascs
 from bumble.profiles import bap
 from bumble.profiles import cap
 from bumble.profiles import csip
@@ -39,6 +38,7 @@ from mobly import test_runner
 from mobly import signals
 from typing_extensions import override
 
+from navi.bumble_ext import ascs
 from navi.bumble_ext import ccp
 from navi.bumble_ext import gatt_helper
 from navi.bumble_ext import pacs
@@ -106,7 +106,7 @@ def _get_service_from_device(
 
 
 def _get_audio_context_entry(
-    ase: ascs.AseStateMachine,
+    ase: ascs.AudioStreamEndpointCharacteristic,
 ) -> le_audio.Metadata.Entry | None:
   return next(
       (
@@ -414,16 +414,6 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
 
   @override
   async def async_setup_test(self) -> None:
-    # Make sure BT is enabled before removing bonding devices.
-    self.assertTrue(self.dut.bt.enable())
-    self.dut.bt.waitForAdapterState(android_constants.AdapterState.ON)
-    # Due to b/396352434, Settings might crash and freeze after restaring BT if
-    # there are still some bonding devices.
-    # So we need to remove all bonding/bonded devices before BT to avoid the
-    # ANR.
-    for device_address in self.dut.bt.getBondedDevices():
-      self.dut.bt.removeBond(device_address)
-
     await super().async_setup_test()
     sirk = secrets.token_bytes(csip.SET_IDENTITY_RESOLVING_KEY_LENGTH)
     for ref, audio_location in zip(
@@ -581,7 +571,10 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
               ase,
               ase.EVENT_STATE_CHANGE,
               functools.partial(
-                  lambda ase: cast(ascs.AseStateMachine, ase).state, ase
+                  lambda ase: cast(
+                      ascs.AudioStreamEndpointCharacteristic, ase
+                  ).state,
+                  ase,
               ),
           )
           for ase in _get_service_from_device(
@@ -593,14 +586,16 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
     # Make sure audio is not streaming.
     async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
       for ase_state in sink_ase_states:
-        await ase_state.wait_for_target_value(ascs.AseStateMachine.State.IDLE)
+        await ase_state.wait_for_target_value(
+            ascs.AudioStreamEndpointCharacteristic.State.IDLE
+        )
 
     self.logger.info("[DUT] Start audio streaming")
     await asyncio.to_thread(self.dut.bt.audioPlaySine)
     async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
       for ase_state in sink_ase_states:
         await ase_state.wait_for_target_value(
-            ascs.AseStateMachine.State.STREAMING
+            ascs.AudioStreamEndpointCharacteristic.State.STREAMING
         )
 
     # Streaming for 1 second.
@@ -610,7 +605,9 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
     await asyncio.to_thread(self.dut.bt.audioStop)
     async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
       for ase_state in sink_ase_states:
-        await ase_state.wait_for_target_value(ascs.AseStateMachine.State.IDLE)
+        await ase_state.wait_for_target_value(
+            ascs.AudioStreamEndpointCharacteristic.State.IDLE
+        )
 
   async def test_bidirectional_audio_stream(self) -> None:
     """Tests bidirectional audio stream between DUT and REF.
@@ -634,7 +631,10 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
               ase,
               ase.EVENT_STATE_CHANGE,
               functools.partial(
-                  lambda ase: cast(ascs.AseStateMachine, ase).state, ase
+                  lambda ase: cast(
+                      ascs.AudioStreamEndpointCharacteristic, ase
+                  ).state,
+                  ase,
               ),
           )
           for ase in _get_service_from_device(
@@ -659,7 +659,9 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
       # Make sure audio is not streaming.
       async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
         for ase_state in ase_states:
-          await ase_state.wait_for_target_value(ascs.AseStateMachine.State.IDLE)
+          await ase_state.wait_for_target_value(
+              ascs.AudioStreamEndpointCharacteristic.State.IDLE
+          )
 
       self.logger.info("[DUT] Start audio streaming")
       await asyncio.to_thread(self.dut.bt.audioPlaySine)
@@ -669,7 +671,7 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
         # streaming.
         for ase_state in ase_states:
           await ase_state.wait_for_target_value(
-              ascs.AseStateMachine.State.STREAMING
+              ascs.AudioStreamEndpointCharacteristic.State.STREAMING
           )
 
       # Streaming for 1 second.
@@ -680,7 +682,9 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
 
     async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
       for ase_state in ase_states:
-        await ase_state.wait_for_target_value(ascs.AseStateMachine.State.IDLE)
+        await ase_state.wait_for_target_value(
+            ascs.AudioStreamEndpointCharacteristic.State.IDLE
+        )
 
   async def test_reconfiguration(self) -> None:
     """Tests reconfiguration from media to conversational.
@@ -696,7 +700,7 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
     await self._pair_major_device()
     await self._pair_minor_device()
 
-    sink_ases: list[ascs.AseStateMachine] = []
+    sink_ases: list[ascs.AudioStreamEndpointCharacteristic] = []
     for ref in self.refs:
       sink_ases.extend(
           ase
@@ -710,7 +714,10 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
             ase,
             ase.EVENT_STATE_CHANGE,
             functools.partial(
-                lambda ase: cast(ascs.AseStateMachine, ase).state, ase
+                lambda ase: cast(
+                    ascs.AudioStreamEndpointCharacteristic, ase
+                ).state,
+                ase,
             ),
         )
         for ase in sink_ases
@@ -719,14 +726,16 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
     # Make sure audio is not streaming.
     async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
       for ase_state in sink_ase_states:
-        await ase_state.wait_for_target_value(ascs.AseStateMachine.State.IDLE)
+        await ase_state.wait_for_target_value(
+            ascs.AudioStreamEndpointCharacteristic.State.IDLE
+        )
 
     self.logger.info("[DUT] Start audio streaming")
     await asyncio.to_thread(self.dut.bt.audioPlaySine)
     async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
       for ase_state in sink_ase_states:
         await ase_state.wait_for_target_value(
-            ascs.AseStateMachine.State.STREAMING
+            ascs.AudioStreamEndpointCharacteristic.State.STREAMING
         )
     for sink_ase in sink_ases:
       self.assertIsInstance(sink_ase.metadata, le_audio.Metadata)
@@ -748,11 +757,13 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
       async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
         self.logger.info("[DUT] Wait for ASE to be released")
         for ase_state in sink_ase_states:
-          await ase_state.wait_for_target_value(ascs.AseStateMachine.State.IDLE)
+          await ase_state.wait_for_target_value(
+              ascs.AudioStreamEndpointCharacteristic.State.IDLE
+          )
         self.logger.info("[DUT] Wait for ASE to be reconfigured")
         for ase_state in sink_ase_states:
           await ase_state.wait_for_target_value(
-              ascs.AseStateMachine.State.STREAMING
+              ascs.AudioStreamEndpointCharacteristic.State.STREAMING
           )
         for sink_ase in sink_ases:
           if (entry := _get_audio_context_entry(sink_ase)) is None:
@@ -796,7 +807,10 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
               ase,
               ase.EVENT_STATE_CHANGE,
               functools.partial(
-                  lambda ase: cast(ascs.AseStateMachine, ase).state, ase
+                  lambda ase: cast(
+                      ascs.AudioStreamEndpointCharacteristic, ase
+                  ).state,
+                  ase,
               ),
           )
           for ase in _get_service_from_device(
@@ -820,7 +834,7 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
         )
         self.logger.info("[REF] Wait for ASE to be streaming")
         await sink_ase.wait_for_target_value(
-            ascs.AseStateMachine.State.STREAMING
+            ascs.AudioStreamEndpointCharacteristic.State.STREAMING
         )
 
   async def test_volume_initialization(self) -> None:

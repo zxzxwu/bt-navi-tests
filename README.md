@@ -23,7 +23,7 @@ This is a test suite for Bluetooth on Android devices.
   We recommend to use Linux as the test host, but Windows is also supported.
 
   The test host should have the following libraries installed:
-  * python3.11 or later
+  * Python 3.12 or later
     * Check your Python 3 version number:
 
     ```bash
