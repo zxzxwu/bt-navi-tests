@@ -38,7 +38,7 @@ _Callback = bl4a_api.CallbackHandler
 _DEFAULT_STEP_TIMEOUT_SECONDS = 5.0
 _HFP_AG_SDP_HANDLE = 1
 _PROPERTY_SWB_SUPPORTED = "bluetooth.hfp.swb.supported"
-_PROPERTY_HF_FEATURES = "bluetooth.hfp.hf_client_features.config"
+_PROPERTY_HF_CLIENT_FEATURES = "bluetooth.hfp.hf_client_features.config"
 _MIN_HFP_VOLUME = 1
 _MAX_HFP_VOLUME = 15
 _STREAM_TYPE_CALL = android_constants.StreamType.CALL
@@ -51,9 +51,13 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
   @override
   async def async_setup_class(self) -> None:
     await super().async_setup_class()
+
     if self.dut.device.is_emulator:
-      self.dut.setprop(android_constants.Property.HFP_HF_ENABLED, "true")
-      self.dut.setprop(_PROPERTY_HF_FEATURES, "0x1b5")
+      self.setprop_for_class_context(
+          android_constants.Property.HFP_HF_ENABLED, "true"
+      )
+
+      self.setprop_for_class_context(_PROPERTY_HF_CLIENT_FEATURES, "0x1b5")
 
     if self.dut.getprop(android_constants.Property.HFP_HF_ENABLED) != "true":
       raise signals.TestAbortClass("DUT does not have HFP HF enabled.")
@@ -148,7 +152,7 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
 
     self.logger.info("[DUT] Connect and pair REF.")
     with self.dut.bl4a.register_callback(bl4a_api.Module.HFP_HF) as dut_cb:
-      await self.classic_connect_and_pair()
+      await self.classic_connect_and_pair(connect_profiles=True)
 
       self.logger.info("[DUT] Wait for HFP connected.")
       await self._wait_for_hfp_state(dut_cb, _HfpState.CONNECTED)
@@ -252,7 +256,7 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
     with (
         self.dut.bl4a.register_callback(bl4a_api.Module.HFP_HF) as dut_hfp_cb,
     ):
-      await self.classic_connect_and_pair()
+      await self.classic_connect_and_pair(connect_profiles=True)
 
       self.logger.info("[DUT] Wait for HFP connected.")
       await self._wait_for_hfp_state(dut_hfp_cb, _HfpState.CONNECTED)
@@ -336,7 +340,7 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
         self.dut.bl4a.register_callback(bl4a_api.Module.HFP_HF) as dut_hfp_cb,
         self.dut.bl4a.register_callback(bl4a_api.Module.AUDIO) as dut_audio_cb,
     ):
-      await self.classic_connect_and_pair()
+      await self.classic_connect_and_pair(connect_profiles=True)
 
       ref_volumes = asyncio.Queue[int]()
       self.logger.info("[REF] Wait for HFP connected.")
@@ -395,7 +399,7 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
     self.dut.shell(f"dumpsys battery set level {initial_battery_level}")
 
     with self.dut.bl4a.register_callback(bl4a_api.Module.HFP_HF) as dut_cb:
-      await self.classic_connect_and_pair()
+      await self.classic_connect_and_pair(connect_profiles=True)
 
       self.logger.info("[REF] Wait for HFP connected.")
       async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
@@ -458,7 +462,7 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
     self.test_case_context.push(hf_cb)
     self.test_case_context.push(telecom_cb)
 
-    await self.classic_connect_and_pair()
+    await self.classic_connect_and_pair(connect_profiles=True)
 
     self.logger.info("[REF] Wait for HFP connected.")
     async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):

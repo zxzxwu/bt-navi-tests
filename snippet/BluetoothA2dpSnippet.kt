@@ -17,6 +17,8 @@
 package com.google.wireless.android.pixel.bluetooth.snippet
 
 import android.bluetooth.BluetoothA2dp
+import android.bluetooth.BluetoothCodecConfig
+import android.bluetooth.BluetoothCodecStatus
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
@@ -35,7 +37,7 @@ class BluetoothA2dpSnippet : Snippet {
   private val instrumentation = InstrumentationRegistry.getInstrumentation()
   private val context = instrumentation.targetContext
   private val bluetoothAdapter = context.getSystemService(BluetoothManager::class.java).adapter
-  private val proxy = Utils.getProfileProxy<BluetoothA2dp>(context, BluetoothProfile.A2DP)
+  private val proxy = Utils.getProfileProxy(context, BluetoothProfile.A2DP) as BluetoothA2dp
   private val broadcastReceivers = mutableMapOf<String, BroadcastReceiver>()
 
   init {
@@ -50,6 +52,7 @@ class BluetoothA2dpSnippet : Snippet {
         addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED)
         addAction(BluetoothA2dp.ACTION_PLAYING_STATE_CHANGED)
         addAction(BluetoothA2dp.ACTION_ACTIVE_DEVICE_CHANGED)
+        addAction(BluetoothA2dp.ACTION_CODEC_CONFIG_CHANGED)
       }
     broadcastReceivers[callbackId] =
       object : BroadcastReceiver() {
@@ -57,6 +60,14 @@ class BluetoothA2dpSnippet : Snippet {
           val device =
             intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
           val state = intent.getIntExtra(BluetoothProfile.EXTRA_STATE, BluetoothDevice.ERROR)
+          val codecType =
+            intent
+              .getParcelableExtra(
+                BluetoothCodecStatus.EXTRA_CODEC_STATUS,
+                BluetoothCodecStatus::class.java,
+              )
+              ?.codecConfig
+              ?.codecType
           when (intent.action) {
             BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED -> {
               postSnippetEvent(callbackId, SnippetConstants.PROFILE_CONNECTION_STATE_CHANGE) {
@@ -73,6 +84,15 @@ class BluetoothA2dpSnippet : Snippet {
             BluetoothA2dp.ACTION_ACTIVE_DEVICE_CHANGED -> {
               postSnippetEvent(callbackId, SnippetConstants.ACTIVE_DEVICE_CHANGED) {
                 putString(SnippetConstants.FIELD_DEVICE, device?.address)
+              }
+            }
+            BluetoothA2dp.ACTION_CODEC_CONFIG_CHANGED -> {
+              postSnippetEvent(callbackId, SnippetConstants.A2DP_CODEC_CONFIG_CHANGED) {
+                putString(SnippetConstants.FIELD_DEVICE, device?.address)
+                putInt(
+                  SnippetConstants.A2DP_FIELD_CODEC_TYPE,
+                  codecType ?: BluetoothCodecConfig.SOURCE_CODEC_TYPE_INVALID,
+                )
               }
             }
           }
@@ -102,6 +122,16 @@ class BluetoothA2dpSnippet : Snippet {
   @Rpc(description = "Get A2DP playing state of device [address]")
   fun isA2dpPlaying(address: String): Boolean =
     proxy.isA2dpPlaying(bluetoothAdapter.getRemoteDevice(address))
+
+  /* Set A2DP codec config of device [address] to [codecConfig]. */
+  @Rpc(description = "Set A2DP codec config of device [address] to [codecConfig]")
+  fun setA2dpCodecConfig(address: String, codecType: Int) {
+    val builder =
+      BluetoothCodecConfig.Builder()
+        .setCodecType(codecType)
+        .setCodecPriority(BluetoothCodecConfig.CODEC_PRIORITY_HIGHEST)
+    proxy.setCodecConfigPreference(bluetoothAdapter.getRemoteDevice(address), builder.build())
+  }
 
   companion object {
     const val TAG = "BluetoothA2dpSnippet"

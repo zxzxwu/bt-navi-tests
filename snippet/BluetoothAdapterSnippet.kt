@@ -52,7 +52,6 @@ import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
@@ -81,10 +80,11 @@ class BluetoothAdapterSnippet : Snippet {
       object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
           when (intent.action) {
-            BluetoothAdapter.ACTION_BLE_STATE_CHANGED ->
-              adapterState.tryEmit(
-                intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
-              )
+            BluetoothAdapter.ACTION_BLE_STATE_CHANGED -> {
+              val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+              Log.d(TAG, "BLE state changed to ${BluetoothAdapter.nameForState(state)}")
+              adapterState.value = state
+            }
           }
         }
       },
@@ -111,7 +111,7 @@ class BluetoothAdapterSnippet : Snippet {
             )
           }
         }
-        .first { it != BluetoothAdapter.STATE_OFF }
+        .first { it != BluetoothAdapter.STATE_ON }
     }
     val result = bluetoothAdapter.clearBluetooth()
     if (result) {
@@ -127,8 +127,6 @@ class BluetoothAdapterSnippet : Snippet {
           }
         }
         .first { it == BluetoothAdapter.STATE_ON }
-      // b/266611263: Delay to initialize the Bluetooth completely and to fix flakiness
-      delay(1.seconds)
     } else {
       turningOff.cancel()
     }
@@ -494,7 +492,7 @@ class BluetoothAdapterSnippet : Snippet {
         }
       }
 
-    advertiser.startAdvertising(advertiseSettings, advertiseData, scanResponse, advertiseCallback)
+    advertiser?.startAdvertising(advertiseSettings, advertiseData, scanResponse, advertiseCallback)
 
     withTimeoutOrNull(ADVERTISING_START_TIMEOUT) { deferred.await() }
       ?: throw RuntimeException("Advertising didn't start after ${ADVERTISING_START_TIMEOUT}")
@@ -534,7 +532,7 @@ class BluetoothAdapterSnippet : Snippet {
         }
       }
 
-    bluetoothAdapter.bluetoothLeAdvertiser.startAdvertisingSet(
+    bluetoothAdapter.bluetoothLeAdvertiser?.startAdvertisingSet(
       advertiseSetParameters,
       advertiseData,
       scanResponse,
@@ -553,13 +551,13 @@ class BluetoothAdapterSnippet : Snippet {
   /** Stops BLE advertiser with [cookie]. */
   @Rpc(description = "Stop BLE Advertising")
   fun stopAdvertising(cookie: String) =
-    advertisers.remove(cookie)?.let { bluetoothAdapter.bluetoothLeAdvertiser.stopAdvertising(it) }
+    advertisers.remove(cookie)?.let { bluetoothAdapter.bluetoothLeAdvertiser?.stopAdvertising(it) }
 
   /** Stops a BLE advertising set with [cookie]. */
   @Rpc(description = "Stop BLE Advertising Set")
   fun stopAdvertisingSet(cookie: String) =
     advertisingSets.remove(cookie)?.let {
-      bluetoothAdapter.bluetoothLeAdvertiser.stopAdvertisingSet(it)
+      bluetoothAdapter.bluetoothLeAdvertiser?.stopAdvertisingSet(it)
     }
 
   /**
@@ -596,7 +594,7 @@ class BluetoothAdapterSnippet : Snippet {
     // Mobly snippet lib cannot pass non-primitive list properly, so we only take 0 or 1 filter
     // here (and it's the most commonly used case).
     val scanFilters = listOfNotNull(scanFilter)
-    scanner.startScan(
+    scanner?.startScan(
       /* filters = */ scanFilters,
       /* settings = */ scanSettings ?: ScanSettings.Builder().build(),
       /* callback = */ callback,
@@ -608,7 +606,7 @@ class BluetoothAdapterSnippet : Snippet {
   @Rpc(description = "Stop BLE scanning")
   fun stopScanning(callbackId: String) {
     scanners[callbackId]?.let {
-      bluetoothAdapter.bluetoothLeScanner.stopScan(it)
+      bluetoothAdapter.bluetoothLeScanner?.stopScan(it)
       scanners.remove(callbackId)
     } ?: throw IllegalArgumentException("Scanner with cookie $callbackId doesn't exist")
   }

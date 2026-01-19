@@ -19,7 +19,7 @@ from collections.abc import Sequence
 import dataclasses
 import enum
 import struct
-from typing import Self, Tuple, Type, TypeAlias
+from typing import Self, TypeAlias
 
 from bumble import core
 from bumble import device
@@ -86,7 +86,7 @@ class StatusFlag(enum.IntFlag):
     return struct.pack('<H', self.value)
 
   @classmethod
-  def parse_from(cls: Type[Self], data: bytes, offset: int = 0) -> Self:
+  def parse_from(cls, data: bytes, offset: int = 0) -> Self:
     del offset  # Unused.
     return cls(struct.unpack('<H', data)[0])
 
@@ -144,7 +144,7 @@ class CallInfo:
   call_uri: str
 
   @classmethod
-  def from_bytes(cls: Type[Self], data: bytes) -> Self:
+  def from_bytes(cls, data: bytes) -> Self:
     return cls(
         call_index=data[1],
         call_state=CallState(data[2]),
@@ -153,7 +153,7 @@ class CallInfo:
     )
 
   @classmethod
-  def parse_list(cls: Type[Self], data: bytes) -> list[Self]:
+  def parse_list(cls, data: bytes) -> list[Self]:
     calls = []
     offset = 0
     while offset < len(data):
@@ -179,7 +179,7 @@ class CallInfo:
 
 
 _Properties: TypeAlias = gatt.Characteristic.Properties
-_CHARACTERISTICS: list[Tuple[str, gatt.UUID, _Properties]] = [
+_CHARACTERISTICS: list[tuple[str, gatt.UUID, _Properties]] = [
     (
         'bearer_provider_name',
         CharacteristicUuid.BEARER_PROVIDER_NAME,

@@ -19,13 +19,12 @@ from __future__ import annotations
 import dataclasses
 import enum
 import struct
-from typing import ClassVar
+from typing import ClassVar, Self
 
 from bumble import core
 from bumble import device
 from bumble import hci
 from bumble import utils
-from typing_extensions import Self
 
 
 # =============================================================================
@@ -119,7 +118,7 @@ class RasControlPointOperation:
     raise NotImplementedError
 
   @classmethod
-  def from_bytes(cls: type[Self], data: bytes) -> RasControlPointOperation:
+  def from_bytes(cls, data: bytes) -> RasControlPointOperation:
     match data[0]:
       case RasControlPointOpCode.GET_RANGING_DATA:
         return GetRangingDataOperation.from_bytes(data)
@@ -146,7 +145,7 @@ class GetRangingDataOperation(RasControlPointOperation):
     return struct.pack('<BH', self.op_code, self.ranging_counter)
 
   @classmethod
-  def from_bytes(cls: type[Self], data: bytes) -> Self:
+  def from_bytes(cls, data: bytes) -> Self:
     return cls(*struct.unpack_from('<H', data, 1))
 
 
@@ -161,7 +160,7 @@ class AckRangingDataOperation(RasControlPointOperation):
     return struct.pack('<BH', self.op_code, self.ranging_counter)
 
   @classmethod
-  def from_bytes(cls: type[Self], data: bytes) -> Self:
+  def from_bytes(cls, data: bytes) -> Self:
     return cls(*struct.unpack_from('<H', data, 1))
 
 
@@ -184,7 +183,7 @@ class RetrieveLostRangingDataSegmentsOperation(RasControlPointOperation):
     )
 
   @classmethod
-  def from_bytes(cls: type[Self], data: bytes) -> Self:
+  def from_bytes(cls, data: bytes) -> Self:
     return cls(*struct.unpack_from('<HBB', data, 1))
 
 
@@ -198,7 +197,7 @@ class AbortOperationOperation(RasControlPointOperation):
     return bytes([self.op_code])
 
   @classmethod
-  def from_bytes(cls: type[Self], data: bytes) -> Self:
+  def from_bytes(cls, data: bytes) -> Self:
     return cls()
 
 
@@ -213,7 +212,7 @@ class SetFilterOperation(RasControlPointOperation):
     return struct.pack('<BH', self.op_code, self.filter_configuration)
 
   @classmethod
-  def from_bytes(cls: type[Self], data: bytes) -> Self:
+  def from_bytes(cls, data: bytes) -> Self:
     return cls(*struct.unpack_from('<H', data, 1))
 
 
@@ -229,7 +228,7 @@ class ControlPointOperationResponse:
   op_code: ClassVar[RasControlPointResponseOpCode]
 
   @classmethod
-  def from_bytes(cls: type[Self], data: bytes) -> ControlPointOperationResponse:
+  def from_bytes(cls, data: bytes) -> ControlPointOperationResponse:
     match data[0]:
       case RasControlPointResponseOpCode.COMPLETE_RANGING_DATA_RESPONSE:
         return CompleteRangingDataResponse.from_bytes(data)
@@ -255,7 +254,7 @@ class CompleteRangingDataResponse(ControlPointOperationResponse):
     return struct.pack('<BH', self.op_code, self.ranging_counter)
 
   @classmethod
-  def from_bytes(cls: type[Self], data: bytes) -> Self:
+  def from_bytes(cls, data: bytes) -> Self:
     return cls(*struct.unpack_from('<H', data, 1))
 
 
@@ -278,7 +277,7 @@ class CompleteLostRangingDataResponse(ControlPointOperationResponse):
     )
 
   @classmethod
-  def from_bytes(cls: type[Self], data: bytes) -> Self:
+  def from_bytes(cls, data: bytes) -> Self:
     return cls(*struct.unpack_from('<HBB', data, 1))
 
 
@@ -293,7 +292,7 @@ class CodeResponse(ControlPointOperationResponse):
     return bytes([self.op_code, self.value])
 
   @classmethod
-  def from_bytes(cls: type[Self], data: bytes) -> Self:
+  def from_bytes(cls, data: bytes) -> Self:
     return cls(*struct.unpack_from('<B', data, 1))
 
 
@@ -313,7 +312,7 @@ class SegmentationHeader:
     )])
 
   @classmethod
-  def from_bytes(cls: type[Self], data: bytes) -> Self:
+  def from_bytes(cls, data: bytes) -> Self:
     """Parse Segmentation Header from bytes."""
     return cls(
         is_first=bool(data[0] & 0x01),
@@ -340,7 +339,7 @@ class RangingHeader:
     )
 
   @classmethod
-  def from_bytes(cls: type[Self], data: bytes) -> Self:
+  def from_bytes(cls, data: bytes) -> Self:
     """Parse Ranging Header from bytes."""
     (
         ranging_counter_and_configuration_id,
@@ -372,7 +371,7 @@ class Step:
 
   @classmethod
   def parse_from(
-      cls: type[Self],
+      cls,
       data: bytes,
       config: device.ChannelSoundingConfig,
       num_antenna_paths: int,
@@ -430,7 +429,7 @@ class Subevent:
 
   @classmethod
   def parse_from(
-      cls: type[Self],
+      cls,
       data: bytes,
       config: device.ChannelSoundingConfig,
       num_antenna_paths: int,
@@ -481,7 +480,7 @@ class RangingData:
 
   @classmethod
   def from_bytes(
-      cls: type[Self],
+      cls,
       data: bytes,
       config: device.ChannelSoundingConfig,
   ) -> Self:

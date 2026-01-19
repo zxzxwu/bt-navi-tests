@@ -59,7 +59,7 @@ from navi.utils import snippet_stub
 
 _NAVI_PARAMETERIZED = "_NAVI_PARAMETERIZED"
 _NAVI_REQUIRE_FLAG = "_NAVI_REQUIRE_FLAG"
-_SETUP_TIMEOUT_SECONDS = 10.0
+_SETUP_TIMEOUT_SECONDS = 15.0
 # 100 * 0.625ms = 62.5ms
 _DEFAULT_ADVERTISING_INTERVAL = 100
 RECORD_FULL_DATA = "record_full_data"
@@ -173,7 +173,7 @@ class AndroidSnippetDeviceWrapper:
 
   def setprop(self, prop_name: str, prop_value: str) -> None:
     """Sets a property of the device."""
-    self.adb.shell(["setprop", prop_name, prop_value])
+    self.adb.shell(["setprop", prop_name, f"'{prop_value}'"])
 
   @property
   @retry_lib.retry_on_exception(initial_delay_sec=1, num_retries=3)
@@ -786,6 +786,8 @@ class AndroidBumbleTestBase(BaseTestBase):
           address_resolution_offload=True,
           # Enable LE subrating for Bumble devices.
           le_subrate_enabled=True,
+          # Enable EATT.
+          eatt_enabled=True,
           # Set a random IRK.
           irk=secrets.token_bytes(16),
           # Set a random static address.
@@ -1015,6 +1017,7 @@ class AndroidBumbleTestBase(BaseTestBase):
       self,
       ref: crown.CrownDevice | None = None,
       direction: constants.Direction = constants.Direction.OUTGOING,
+      connect_profiles: bool = False,
   ) -> bumble.device.Connection:
     """Connects and creates bond from DUT over BR/EDR.
 
@@ -1028,6 +1031,8 @@ class AndroidBumbleTestBase(BaseTestBase):
       ref: The Bumble device to pair with. If None, first Bumble device will be
         used.
       direction: The direction of the pairing.
+      connect_profiles: Whether to connect profiles after pairing. This may
+        fails if REF has no known service UUIDs.
 
     Returns:
       REF->DUT ACL connection instance.
@@ -1110,6 +1115,15 @@ class AndroidBumbleTestBase(BaseTestBase):
           )
       ):
         self.fail("Failed to find ACL connection between DUT and REF.")
+
+      if connect_profiles:
+        self.logger.info("[DUT] Wait for UUID changed.")
+        await dut_cb.wait_for_event(
+            bl4a_api.UuidChanged(address=ref.address, uuids=matcher.ANY),
+            timeout=_SETUP_TIMEOUT_SECONDS,
+        )
+        # Trigger profile connections.
+        self.dut.bt.connect(ref.address)
       return ref_dut_acl
 
   @retry_lib.retry_on_exception(initial_delay_sec=1, num_retries=3)
@@ -1264,6 +1278,26 @@ class AndroidBumbleTestBase(BaseTestBase):
         )
         # Trigger profile connections.
         self.dut.bt.connect(ref_addr)
+
+  def setprop_for_class_context(self, prop: str, tmp_value: str) -> None:
+    """Sets a property and registers a callback to revert it.
+
+    If the property is already set to the tmp_value, do nothing.
+
+    Args:
+      prop: The property to set.
+      tmp_value: The value to set the property to.
+    """
+    current_value = self.dut.getprop(prop)
+    if current_value == tmp_value:
+      return
+
+    self.logger.info("[DUT] Setting %s to %s", prop, tmp_value)
+    self.dut.setprop(prop, tmp_value)
+
+    self.test_class_context.callback(
+        lambda: self.dut.setprop(prop, current_value)
+    )
 
 
 class OneDeviceTestBase(AndroidBumbleTestBase):

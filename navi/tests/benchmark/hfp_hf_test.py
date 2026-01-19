@@ -112,7 +112,7 @@ class HfpHfTest(test_base.PerformanceTestBase):
 
     self.logger.info("[DUT] Connect and pair REF.")
     with self.dut.bl4a.register_callback(bl4a_api.Module.HFP_HF) as dut_cb:
-      await self.classic_connect_and_pair()
+      await self.classic_connect_and_pair(connect_profiles=True)
 
       self.logger.info("[DUT] Wait for HFP connected.")
       await self._wait_for_hfp_state(dut_cb, _HfpState.CONNECTED)

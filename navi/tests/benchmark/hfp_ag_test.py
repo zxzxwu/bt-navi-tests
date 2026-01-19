@@ -73,7 +73,7 @@ class HfpAgTest(test_base.PerformanceTestBase):
       )
 
       self.logger.info("[DUT] Connect and pair REF.")
-      await self.classic_connect_and_pair()
+      await self.classic_connect_and_pair(connect_profiles=True)
 
       self.logger.info("[DUT] Wait for HFP connected.")
       await dut_cb.wait_for_event(
@@ -215,7 +215,7 @@ class HfpAgTest(test_base.PerformanceTestBase):
     preferred_codec = _AudioCodec.CVSD
     with self.dut.bl4a.register_callback(_Module.HFP_AG) as dut_hfp_cb:
       self.logger.info("[DUT] Connect and pair REF.")
-      await self.classic_connect_and_pair()
+      await self.classic_connect_and_pair(connect_profiles=True)
 
       self.logger.info("[DUT] Wait for HFP connected.")
       await dut_hfp_cb.wait_for_event(

@@ -16,9 +16,10 @@
 
 import asyncio
 import datetime
+from typing import Self
+
 from bumble import core
 from bumble import hci
-from typing_extensions import Self
 
 from navi.bumble_ext import crown
 from navi.tests import navi_test_base
@@ -126,4 +127,3 @@ async def terminate_connection_from_ref(
             ref.address, transport=android_constants.Transport.CLASSIC
         ),
     )
-

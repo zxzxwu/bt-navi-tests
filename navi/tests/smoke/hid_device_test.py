@@ -13,6 +13,7 @@
 #  limitations under the License.
 
 """Tests for HID Device over GATT Profile(GATT) implementation on Android."""
+
 import asyncio
 import datetime
 
@@ -25,6 +26,7 @@ from navi.tests import navi_test_base
 from navi.utils import android_constants
 from navi.utils import bl4a_api
 from navi.utils import constants
+from navi.utils import retry as retry_lib
 
 
 _DEFAULT_STEP_TIMEOUT = datetime.timedelta(seconds=10)
@@ -40,29 +42,16 @@ class HidDeviceTest(navi_test_base.TwoDevicesTestBase):
   @override
   async def async_setup_class(self) -> None:
     await super().async_setup_class()
+
     if (
-        self.dut.device.adb.getprop(
-            android_constants.Property.HID_DEVICE_ENABLED
-        )
+        self.dut.getprop(android_constants.Property.HID_DEVICE_ENABLED)
         != "true"
     ):
       raise signals.TestAbortClass("HID device is not supported on DUT")
 
-  async def _setup_connection(self) -> bl4a_api.CallbackHandler:
-    self._setup_hid_service()
-
-    self.logger.info("[DUT] Register HID Device App")
-    dut_hid_cb = self.dut.bl4a.register_hid_device_app()
-    self.test_case_context.push(dut_hid_cb)
-
-    self.logger.info("[DUT] Pair with REF")
-    await self.classic_connect_and_pair(
-        direction=constants.Direction.INCOMING
-    )
-
-    self.logger.info("[DUT] Connect to HID Device")
-    self.dut.bt.hidDeviceConnect(self.ref.address)
-
+  async def _wait_for_hid_device_connected(
+      self, dut_hid_cb: bl4a_api.CallbackHandler
+  ) -> None:
     self.logger.info("[DUT] Wait for HID Device connected")
     await dut_hid_cb.wait_for_event(
         bl4a_api.ProfileConnectionStateChanged(
@@ -71,7 +60,93 @@ class HidDeviceTest(navi_test_base.TwoDevicesTestBase):
         ),
     )
 
+  async def _wait_for_hid_device_disconnected(
+      self,
+      *,
+      dut_hid_cb: bl4a_api.CallbackHandler,
+      dut_adapter_cb: bl4a_api.CallbackHandler,
+  ) -> None:
+    self.logger.info("[DUT] Wait for HID Device disconnected")
+    await dut_hid_cb.wait_for_event(
+        bl4a_api.ProfileConnectionStateChanged(
+            address=self.ref.address,
+            state=android_constants.ConnectionState.DISCONNECTED,
+        ),
+    )
+
+    self.logger.info("[DUT] Wait for acl disconnected")
+    await dut_adapter_cb.wait_for_event(bl4a_api.AclDisconnected)
+
+  @retry_lib.retry_on_exception(initial_delay_sec=1, num_retries=3)
+  def _register_hid_device_app(self) -> bl4a_api.CallbackHandler:
+    """Registers the HID Device App with retry since proxy may not be ready."""
+    self.logger.info("[DUT] Register HID Device App")
+    dut_hid_cb = self.dut.bl4a.register_hid_device_app()
+    self.test_case_context.push(dut_hid_cb)
+
     return dut_hid_cb
+
+  async def _setup_connection(self) -> bl4a_api.CallbackHandler:
+    self._setup_hid_service()
+
+    self.logger.info("[DUT] Register HID Device App")
+    dut_hid_cb = self._register_hid_device_app()
+    self.test_case_context.push(dut_hid_cb)
+
+    self.logger.info("[DUT] Pair with REF")
+    await self.classic_connect_and_pair(direction=constants.Direction.INCOMING)
+
+    self.logger.info("[DUT] Connect to HID Device")
+    self.dut.bt.hidDeviceConnect(self.ref.address)
+
+    return dut_hid_cb
+
+  def _verify_hid_device_connected(self) -> None:
+    """Verifies that the HID Device is connected."""
+    self.logger.info("[DUT] Verify the HID Device is connected to REF")
+    self.assertIn(self.ref.address, self.dut.bt.getHidDeviceConnectedDevices())
+
+    self.logger.info("[DUT] Verify the HID Device ConnectionState is CONNECTED")
+    self.assertEqual(
+        self.dut.bt.getHidDeviceConnectionState(self.ref.address),
+        android_constants.ConnectionState.CONNECTED,
+    )
+
+    self.logger.info(
+        "[DUT] Verify the HID Device connection state is connected"
+    )
+    self.assertIn(
+        self.ref.address,
+        self.dut.bt.getHidDeviceDevicesMatchingConnectionStates(
+            [android_constants.ConnectionState.CONNECTED]
+        ),
+    )
+
+  def _verify_hid_device_disconnected(self) -> None:
+    """Verifies that the HID Device is disconnected."""
+    self.logger.info("[DUT] Verify the HID Device is disconnected from REF")
+    self.assertNotIn(
+        self.ref.address, self.dut.bt.getHidDeviceConnectedDevices()
+    )
+
+    self.logger.info(
+        "[DUT] Verify the HID Device connection state is disconnected"
+    )
+    self.assertEqual(
+        self.dut.bt.getHidDeviceConnectionState(self.ref.address),
+        android_constants.ConnectionState.DISCONNECTED,
+    )
+
+    self.logger.info(
+        "[DUT] Verify the disconnected HID Device is in"
+        " getHidDeviceDevicesMatchingConnectionStates"
+    )
+    self.assertIn(
+        self.ref.address,
+        self.dut.bt.getHidDeviceDevicesMatchingConnectionStates(
+            [android_constants.ConnectionState.DISCONNECTED]
+        ),
+    )
 
   async def test_connect(self) -> None:
     """Tests establishing the HID connection from DUT to REF.
@@ -81,7 +156,9 @@ class HidDeviceTest(navi_test_base.TwoDevicesTestBase):
       2. Establish the HID connection between DUT and REF.
       3. Verify the HID connection is established.
     """
-    await self._setup_connection()
+    dut_hid_cb = await self._setup_connection()
+    await self._wait_for_hid_device_connected(dut_hid_cb)
+    self._verify_hid_device_connected()
 
   async def test_disconnect(self) -> None:
     """Tests reconnecting the HID connection.
@@ -93,17 +170,20 @@ class HidDeviceTest(navi_test_base.TwoDevicesTestBase):
       4. Verify the HID connection is terminated.
     """
     dut_hid_cb = await self._setup_connection()
+    await self._wait_for_hid_device_connected(dut_hid_cb)
+    self._verify_hid_device_connected()
 
-    self.logger.info("[REF] Disconnect")
-    self.dut.bt.hidDeviceDisconnect(self.ref.address)
+    with self.dut.bl4a.register_callback(
+        bl4a_api.Module.ADAPTER
+    ) as dut_adapter_cb:
+      self.logger.info("[REF] Disconnect")
+      self.dut.bt.hidDeviceDisconnect(self.ref.address)
 
-    self.logger.info("[DUT] Wait for HID Device disconnected")
-    await dut_hid_cb.wait_for_event(
-        bl4a_api.ProfileConnectionStateChanged(
-            address=self.ref.address,
-            state=android_constants.ConnectionState.DISCONNECTED,
-        ),
-    )
+      await self._wait_for_hid_device_disconnected(
+          dut_hid_cb=dut_hid_cb,
+          dut_adapter_cb=dut_adapter_cb,
+      )
+      self._verify_hid_device_disconnected()
 
   async def test_unable_to_connect_without_sdp_settings(self) -> None:
     """Tests unable to connect to the HID Device without SDP settings.
@@ -125,16 +205,18 @@ class HidDeviceTest(navi_test_base.TwoDevicesTestBase):
       3. Send report data from the HID Device.
       4. Verify the report data is received by the HID host.
     """
-    await self._setup_connection()
+    dut_hid_cb = await self._setup_connection()
+    await self._wait_for_hid_device_connected(dut_hid_cb)
+    self._verify_hid_device_connected()
 
     report_type_queue = asyncio.Queue[hid_ext.ReportType]()
     report_data_queue = asyncio.Queue[bytes]()
+
     def on_interrupt_pdu(report_type: hid_ext.ReportType, data: bytes) -> None:
       report_type_queue.put_nowait(report_type)
       report_data_queue.put_nowait(data)
-    self.ref_hid_host.on(
-        hid_ext.HID.EVENT_INTERRUPT_DATA, on_interrupt_pdu
-    )
+
+    self.ref_hid_host.on(hid_ext.HID.EVENT_INTERRUPT_DATA, on_interrupt_pdu)
 
     self.logger.info("[DUT] Send report")
     data = [0x00, 0x01, 0x02, 0x03]
@@ -157,7 +239,9 @@ class HidDeviceTest(navi_test_base.TwoDevicesTestBase):
       4. Reply report data to the ref.
       5. Verify the reply report is received.
     """
-    await self._setup_connection()
+    dut_hid_cb = await self._setup_connection()
+    await self._wait_for_hid_device_connected(dut_hid_cb)
+    self._verify_hid_device_connected()
 
     report_id = 1
     data = [0x00, 0x01, 0x02, 0x03]
@@ -191,7 +275,9 @@ class HidDeviceTest(navi_test_base.TwoDevicesTestBase):
       3. Report error data to the HID Device.
       4. Verify the error is received by the HID Host.
     """
-    await self._setup_connection()
+    dut_hid_cb = await self._setup_connection()
+    await self._wait_for_hid_device_connected(dut_hid_cb)
+    self._verify_hid_device_connected()
 
     report_id = 1
 
@@ -211,8 +297,27 @@ class HidDeviceTest(navi_test_base.TwoDevicesTestBase):
       await get_report_task
     self.assertEqual(
         control_message.exception.result_code,
-        hid_ext.HandshakeMessage.ResultCode.NOT_READY
+        hid_ext.HandshakeMessage.ResultCode.NOT_READY,
     )
+
+  async def test_get_user_app_name(self) -> None:
+    """Tests getting the user app name of the HID Device.
+
+    Test steps:
+      1. Register HID Device App on DUT.
+      2. Establish the HID connection between DUT and REF.
+      3. Verify the user app name is correct.
+    """
+    dut_hid_cb = await self._setup_connection()
+    await self._wait_for_hid_device_connected(dut_hid_cb)
+    self._verify_hid_device_connected()
+
+    self.logger.info("[DUT] Get user app name")
+    self.assertEqual(
+        self.dut.bt.getHidDeviceUserAppName(),
+        android_constants.PACKAGE_NAME_BLUETOOTH_SNIPPET,
+    )
+
 
 if __name__ == "__main__":
   test_runner.main()
