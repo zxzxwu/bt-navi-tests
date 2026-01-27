@@ -14,7 +14,7 @@
 
 """Helper classes for Bumble GATT."""
 
-from typing import Self, Type
+from typing import Self
 from bumble import gatt_client
 from navi.utils import pyee_extensions
 
@@ -42,7 +42,7 @@ class MutableCharacteristicState(
 
   @classmethod
   async def create(
-      cls: Type[Self], characteristic: gatt_client.CharacteristicProxy
+      cls, characteristic: gatt_client.CharacteristicProxy
   ) -> Self:
     instance = cls(characteristic)
     instance.value = await instance._characteristic.read_value()

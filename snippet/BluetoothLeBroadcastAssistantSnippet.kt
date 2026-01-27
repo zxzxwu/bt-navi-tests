@@ -48,10 +48,8 @@ class BluetoothLeBroadcastAssistantSnippet : Snippet {
   private val instrumentation = InstrumentationRegistry.getInstrumentation()
   private val context = instrumentation.targetContext
   private val bassProxy =
-    Utils.getProfileProxy<BluetoothLeBroadcastAssistant>(
-      context,
-      BluetoothProfile.LE_AUDIO_BROADCAST_ASSISTANT,
-    )
+    Utils.getProfileProxy(context, BluetoothProfile.LE_AUDIO_BROADCAST_ASSISTANT)
+      as BluetoothLeBroadcastAssistant
   private val bluetoothAdapter = context.getSystemService(BluetoothManager::class.java).adapter
   private var callbacks =
     mutableMapOf<String, Pair<BluetoothLeBroadcastAssistant.Callback, BroadcastReceiver>>()

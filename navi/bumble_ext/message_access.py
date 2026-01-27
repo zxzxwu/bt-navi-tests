@@ -19,11 +19,13 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import enum
-from typing import Self, Tuple
+import logging
+from typing import Self
 import uuid
 
 from bumble import core
 from bumble import device as bumble_device
+from bumble import l2cap
 from bumble import sdp
 from typing_extensions import override
 
@@ -34,6 +36,8 @@ _DEFAULT_LANGUAGE_BASED_ATTRIBUTE_ID_OFFSET = 0x0100
 MAX_RFCOMM_OBEX_PACKET_LENGTH = 65530
 MAS_TARGET_UUID = uuid.UUID('bb582b40-420c-11db-b0de-0800200c9a66')
 MNS_TARGET_UUID = uuid.UUID('bb582b41-420c-11db-b0de-0800200c9a66')
+
+_logger = logging.getLogger(__name__)
 
 
 class ObexHeaderType(bytes, enum.Enum):
@@ -185,9 +189,7 @@ class ApplicationParameter:
     return self.to_bytes()
 
   @classmethod
-  def parse_from(
-      cls: type[Self], data: bytes, offset: int = 0
-  ) -> Tuple[Self, int]:
+  def parse_from(cls, data: bytes, offset: int = 0) -> tuple[Self, int]:
     """Creates an application parameter from the given bytes."""
     tag = cls.Tag(data[offset])
     length = data[offset + 1]
@@ -246,7 +248,7 @@ class ApplicationParameters:
   map_supported_features: int | None = None
 
   @classmethod
-  def from_bytes(cls: type[Self], data: bytes) -> Self:
+  def from_bytes(cls, data: bytes) -> Self:
     """Parses a list of application parameters from the given bytes."""
     offset = 0
     instance = cls()
@@ -432,7 +434,7 @@ class MasSdpInfo:
 
   @classmethod
   async def find(
-      cls: type[Self],
+      cls,
       connection: bumble_device.Connection,
   ) -> Self | None:
     """Finds SDP record for a MAS."""
@@ -600,7 +602,7 @@ class MnsSdpInfo:
 
   @classmethod
   async def find(
-      cls: type[Self],
+      cls,
       connection: bumble_device.Connection,
   ) -> Self | None:
     """Finds SDP record for a MNS."""
@@ -714,10 +716,21 @@ class MnsServerSession(obex.ServerSession):
 
 
 class MnsServer:
+  """MAP Message Notification Service (MNS) server."""
 
-  def __init__(self, rfcomm_manager: rfcomm.Manager) -> None:
-    self.rfcomm_manager = rfcomm_manager
+  def __init__(self, device: bumble_device.Device) -> None:
+    self.device = device
     self.sessions = asyncio.Queue[MnsServerSession]()
-    self.rfcomm_channel = self.rfcomm_manager.register_acceptor(
-        lambda dlc: self.sessions.put_nowait(MnsServerSession(dlc))
+    rfcomm_manager = rfcomm.Manager.find_or_create(device)
+    self.l2cap_server = device.create_l2cap_server(
+        spec=l2cap.ClassicChannelSpec(
+            mode=l2cap.TransmissionMode.ENHANCED_RETRANSMISSION,
+            fcs_enabled=True,
+        ),
+        handler=self._on_connection,
     )
+    self.rfcomm_channel = rfcomm_manager.register_acceptor(self._on_connection)
+
+  def _on_connection(self, bearer: obex.Bearer) -> None:
+    _logger.debug('MNS Connection on %s', bearer)
+    self.sessions.put_nowait(MnsServerSession(bearer))

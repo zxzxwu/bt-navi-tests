@@ -17,22 +17,22 @@
 import asyncio
 import contextlib
 import struct
-from typing import override
 
 from bumble import core
 from bumble import hci
 from mobly import test_runner
 from mobly import signals
+from typing_extensions import override
 
 from navi.bumble_ext import hid
 from navi.tests import navi_test_base
 from navi.utils import android_constants
 from navi.utils import bl4a_api
 from navi.utils import constants
+from navi.utils import input as input_utils
 
 
 _DEFAULT_STEP_TIMEOUT_SECONDS = 10.0
-_PREPARE_INPUT_ACTIVITY_TIMEOUT_SECONDS = 0.5
 _VIDEO_SERVICE_NAME = "video"
 
 
@@ -72,10 +72,7 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
   @override
   async def async_setup_class(self) -> None:
     await super().async_setup_class()
-    if (
-        self.dut.device.adb.getprop(hid.PROPERTY_HID_HOST_SUPPORTED)
-        != "true"
-    ):
+    if self.dut.device.adb.getprop(hid.PROPERTY_HID_HOST_SUPPORTED) != "true":
       raise signals.TestAbortClass("HID host is not supported on DUT")
 
     # Stay awake during the test.
@@ -101,7 +98,7 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
         bl4a_api.Module.HID_HOST
     ) as dut_hid_cb:
       self.logger.info("[DUT] Pair with REF")
-      await self.classic_connect_and_pair()
+      await self.classic_connect_and_pair(connect_profiles=True)
 
       self.logger.info("[DUT] Wait for HID connected")
       await dut_hid_cb.wait_for_event(
@@ -170,11 +167,14 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
     """
     await self.test_connect()
 
-    dut_input_cb = self.dut.bl4a.register_callback(bl4a_api.Module.INPUT)
-    self.test_case_context.push(dut_input_cb)
+    input_monitor = await input_utils.InputMonitor.create(
+        self.dut.device.serial
+    )
+    self.test_case_context.push(input_monitor)
 
-    # Wait for the InputActivity to be ready.
-    await asyncio.sleep(_PREPARE_INPUT_ACTIVITY_TIMEOUT_SECONDS)
+    self.logger.info("[DUT] Wait for input ready")
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      await input_monitor.wait_for_event(["Bumble Keyboard"])
 
     for hid_key in range(
         constants.UsbHidKeyCode.A, constants.UsbHidKeyCode.Z + 1
@@ -186,11 +186,10 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
           bytes([0x01, 0x00, 0x00, hid_key, 0x00, 0x00, 0x00, 0x00, 0x00])
       )
       self.logger.info("[DUT] Wait for key %s down", android_key_code.name)
-      await dut_input_cb.wait_for_event(
-          bl4a_api.KeyEvent(
-              key_code=android_key_code, action=android_constants.KeyAction.DOWN
-          )
-      )
+      async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+        await input_monitor.wait_for_event(
+            ["EV_KEY", f"KEY_{hid_key_code.name}", "DOWN"]
+        )
 
       self.logger.info("[REF] Release HID key %s", hid_key_code.name)
       self.ref_hid_device.send_interrupt_data(
@@ -198,11 +197,10 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
       )
 
       self.logger.info("[DUT] Wait for key %s up", android_key_code.name)
-      await dut_input_cb.wait_for_event(
-          bl4a_api.KeyEvent(
-              key_code=android_key_code, action=android_constants.KeyAction.UP
-          )
-      )
+      async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+        await input_monitor.wait_for_event(
+            ["EV_KEY", f"KEY_{hid_key_code.name}", "UP"]
+        )
 
   async def test_mouse_click(self) -> None:
     """Tests the HID mouse click.
@@ -214,29 +212,30 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
     """
     await self.test_connect()
 
-    dut_input_cb = self.dut.bl4a.register_callback(bl4a_api.Module.INPUT)
-    self.test_case_context.push(dut_input_cb)
+    input_monitor = await input_utils.InputMonitor.create(
+        self.dut.device.serial
+    )
+    self.test_case_context.push(input_monitor)
 
-    # Wait for the InputActivity to be ready.
-    await asyncio.sleep(_PREPARE_INPUT_ACTIVITY_TIMEOUT_SECONDS)
+    self.logger.info("[DUT] Wait for input ready")
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      await input_monitor.wait_for_event(["Bumble Mouse"])
 
     self.logger.info("[REF] Press Primary button")
     hid_report = struct.pack("<BBhhB", 0x02, 0x01, 0, 0, 0)
     self.ref_hid_device.send_interrupt_data(hid_report)
 
     self.logger.info("[DUT] Wait for button press")
-    event = await dut_input_cb.wait_for_event(bl4a_api.MotionEvent)
-    self.assertEqual(event.action, android_constants.MotionAction.BUTTON_PRESS)
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      await input_monitor.wait_for_event(["EV_KEY", "BTN_MOUSE", "DOWN"])
 
     self.logger.info("[REF] Release Primary button")
     hid_report = struct.pack("<BBhhB", 0x02, 0x00, 0, 0, 0)
     self.ref_hid_device.send_interrupt_data(hid_report)
 
-    self.logger.info("[DUT] Wait for button down")
-    event = await dut_input_cb.wait_for_event(bl4a_api.MotionEvent)
-    self.assertEqual(
-        event.action, android_constants.MotionAction.BUTTON_RELEASE
-    )
+    self.logger.info("[DUT] Wait for button up")
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      await input_monitor.wait_for_event(["EV_KEY", "BTN_MOUSE", "UP"])
 
   async def test_mouse_movement(self) -> None:
     """Tests the HID mouse movement.
@@ -248,43 +247,30 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
     """
     await self.test_connect()
 
-    dut_input_cb = self.dut.bl4a.register_callback(bl4a_api.Module.INPUT)
-    self.test_case_context.push(dut_input_cb)
+    input_monitor = await input_utils.InputMonitor.create(
+        self.dut.device.serial
+    )
+    self.test_case_context.push(input_monitor)
 
-    # Wait for the InputActivity to be ready.
-    await asyncio.sleep(_PREPARE_INPUT_ACTIVITY_TIMEOUT_SECONDS)
+    self.logger.info("[DUT] Wait for input ready")
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      await input_monitor.wait_for_event(["Bumble Mouse"])
 
     self.logger.info("[REF] Move on X axis")
     hid_report = struct.pack("<BBhhB", 0x02, 0, 1, 0, 0)
     self.ref_hid_device.send_interrupt_data(hid_report)
 
     self.logger.info("[DUT] Wait for hover movement")
-    await dut_input_cb.wait_for_event(
-        bl4a_api.MotionEvent,
-        lambda e: e.action
-        in (
-            android_constants.MotionAction.HOVER_MOVE,
-            android_constants.MotionAction.HOVER_ENTER,
-            android_constants.MotionAction.HOVER_EXIT,
-        ),
-    )
-    # Clear all events.
-    dut_input_cb.get_all_events(bl4a_api.MotionEvent)
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      await input_monitor.wait_for_event(["EV_REL", " REL_X"])
 
     self.logger.info("[REF] Move on Y axis")
     hid_report = struct.pack("<BBhhB", 0x02, 0, 0, 1, 0)
     self.ref_hid_device.send_interrupt_data(hid_report)
 
     self.logger.info("[DUT] Wait for hover movement")
-    await dut_input_cb.wait_for_event(
-        bl4a_api.MotionEvent,
-        lambda e: e.action
-        in (
-            android_constants.MotionAction.HOVER_MOVE,
-            android_constants.MotionAction.HOVER_ENTER,
-            android_constants.MotionAction.HOVER_EXIT,
-        ),
-    )
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      await input_monitor.wait_for_event(["EV_REL", " REL_Y"])
 
   async def test_reconnection_when_connection_policy_change(self) -> None:
     """Tests the reconnection when connection policy changes.
@@ -474,9 +460,7 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
       )
 
       self.logger.info("[DUT] Wait for the report with report ID 1")
-      event = await dut_hid_cb.wait_for_event(
-          bl4a_api.HidHostReport
-      )
+      event = await dut_hid_cb.wait_for_event(bl4a_api.HidHostReport)
 
       self.logger.info("[DUT] Verify the report is correct")
       self.assertEqual(event.address, self.ref.address)
@@ -493,19 +477,17 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
     await self.test_connect()
 
     report_queue = asyncio.Queue[tuple[hid.ReportType, bytes]]()
+
     def on_interrupt_pdu(report_type: hid.ReportType, data: bytes) -> None:
       report_queue.put_nowait((report_type, data))
-    self.ref_hid_device.on(
-        hid.HID.EVENT_INTERRUPT_DATA, on_interrupt_pdu
-    )
+
+    self.ref_hid_device.on(hid.HID.EVENT_INTERRUPT_DATA, on_interrupt_pdu)
 
     self.logger.info(
         "[DUT] Send the report with report type %s",
     )
     data = bytes([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09])
-    self.dut.bt.sendHidHostData(
-        self.ref.address, data.hex()
-    )
+    self.dut.bt.sendHidHostData(self.ref.address, data.hex())
 
     self.logger.info("[REF] Check report")
     async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
@@ -533,8 +515,7 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
       self.logger.info("[DUT] Set the idle time to %sms", idle_time_ms)
       self.dut.bt.setHidHostIdleTime(self.ref.address, idle_time)
 
-      # Since setHidHostIdleTime does not trigger handshake event, we wait for a
-      # short period for setHidHostIdleTime to complete.
+      # TODO: Remove the sleep and use the callback instead.
       self.logger.info("[DUT] Wait for the idle time changed")
       await asyncio.sleep(0.5)
 

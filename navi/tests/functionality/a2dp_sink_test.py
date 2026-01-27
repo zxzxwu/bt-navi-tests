@@ -47,9 +47,9 @@ class A2dpSinkTest(navi_test_base.TwoDevicesTestBase):
     await super().async_setup_class()
 
     if self.dut.device.is_emulator:
-      # Force enable A2DP Sink and AVRCP Controller on emulator.
-      self.dut.setprop(_Property.A2DP_SINK_ENABLED, "true")
-      self.dut.setprop(_Property.AVRCP_CONTROLLER_ENABLED, "true")
+      self.setprop_for_class_context(_Property.A2DP_SINK_ENABLED, "true")
+
+      self.setprop_for_class_context(_Property.AVRCP_CONTROLLER_ENABLED, "true")
 
     if self.dut.getprop(_Property.A2DP_SINK_ENABLED) != "true":
       raise signals.TestAbortClass("A2DP Sink is not enabled on DUT.")
@@ -114,7 +114,7 @@ class A2dpSinkTest(navi_test_base.TwoDevicesTestBase):
     del ref_avrcp_protocol
 
     self.logger.info("[DUT] Connect and pair REF.")
-    await self.classic_connect_and_pair()
+    await self.classic_connect_and_pair(connect_profiles=True)
 
     dut_a2dp_sink_callback = self.dut.bl4a.register_callback(
         bl4a_api.Module.A2DP_SINK
@@ -168,7 +168,7 @@ class A2dpSinkTest(navi_test_base.TwoDevicesTestBase):
     del ref_avrcp_protocol, ref_avrcp_protocol_queue
 
     self.logger.info("[DUT] Connect and pair REF.")
-    await self.classic_connect_and_pair()
+    await self.classic_connect_and_pair(connect_profiles=True)
 
     async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
       self.logger.info("[REF] Wait for AVDTP connection")

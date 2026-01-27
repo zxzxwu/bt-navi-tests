@@ -777,6 +777,16 @@ constants {
   string_value: "A2DP_PLAYING_STATE_CHANGED"
 }
 
+constants {
+  name: "A2DP_CODEC_CONFIG_CHANGED"
+  string_value: "A2DP_CODEC_CONFIG_CHANGED"
+}
+
+constants {
+  name: "A2DP_FIELD_CODEC_TYPE"
+  string_value: "A2DP_FIELD_CODEC_TYPE"
+}
+
 # ======================== #
 # BluetoothLeAudioSnippet  #
 # ======================== #
@@ -788,6 +798,11 @@ constants {
 constants {
   name: "VOLUME_CHANGED"
   string_value: "VOLUME_CHANGED"
+}
+
+constants {
+  name: "MUTE_CHANGED"
+  string_value: "MUTE_CHANGED"
 }
 
 constants {
@@ -1219,4 +1234,33 @@ constants {
 constants {
   name: "VOICE_COMMAND"
   string_value: "VOICE_COMMAND"
+}
+
+# ============================ #
+# MediaBrowserServiceSnippet   #
+# ============================ #
+
+constants {
+  name: "MEDIA_ITEM_ADDED"
+  string_value: "MEDIA_ITEM_ADDED"
+}
+
+constants {
+  name: "FIELD_TITLE"
+  string_value: "title"
+}
+
+constants {
+  name: "FIELD_BROWSABLE"
+  string_value: "browsable"
+}
+
+constants {
+  name: "FIELD_PLAYABLE"
+  string_value: "playable"
+}
+
+constants {
+  name: "FIELD_CHILDREN"
+  string_value: "children"
 }

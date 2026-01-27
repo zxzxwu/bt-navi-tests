@@ -143,7 +143,7 @@ class A2dpTest(test_base.PerformanceTestBase):
       )
 
       self.logger.info("[DUT] Connect and pair REF.")
-      ref_acl = await self.classic_connect_and_pair()
+      ref_acl = await self.classic_connect_and_pair(connect_profiles=True)
 
       self.logger.info("[DUT] Wait for A2DP connected.")
       await dut_cb.wait_for_event(
@@ -178,7 +178,7 @@ class A2dpTest(test_base.PerformanceTestBase):
           [_A2dpCodec.SBC.get_default_capabilities()],
           _A2DP_SERVICE_RECORD_HANDLE,
       )
-      await self.classic_connect_and_pair()
+      await self.classic_connect_and_pair(connect_profiles=True)
       await dut_cb.wait_for_event(
           bl4a_api.ProfileConnectionStateChanged(
               self.ref.address,
@@ -251,7 +251,7 @@ class A2dpTest(test_base.PerformanceTestBase):
           avrcp_controller_handle=_AVRCP_CONTROLLER_RECORD_HANDLE,
           avrcp_target_handle=_AVRCP_TARGET_RECORD_HANDLE,
       )
-    ref_acl = await self.classic_connect_and_pair()
+    ref_acl = await self.classic_connect_and_pair(connect_profiles=True)
     await performance_tool.terminate_connection_from_ref(self.dut, self.ref)
     for i in range(_DEFAULT_REPEAT_TIMES):
       try:

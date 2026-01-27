@@ -43,7 +43,7 @@ class BluetoothVolumeControlSnippet : Snippet {
   private val bluetoothAdapter = bluetoothManager.adapter
 
   private val vcpProxy =
-    Utils.getProfileProxy<BluetoothVolumeControl>(context, BluetoothProfile.VOLUME_CONTROL)
+    Utils.getProfileProxy(context, BluetoothProfile.VOLUME_CONTROL) as BluetoothVolumeControl
   private val callbackExecutor = context.mainExecutor
 
   init {

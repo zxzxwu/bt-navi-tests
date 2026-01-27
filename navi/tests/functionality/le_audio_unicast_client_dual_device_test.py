@@ -140,7 +140,7 @@ class _GenericMediaControlServiceProxy(mcp.GenericMediaControlServiceProxy):
           with_response=False,
       )
 
-      (response_opcode, response_code) = await self._media_control_point_result
+      response_opcode, response_code = await self._media_control_point_result
       if response_opcode != opcode:
         raise core.InvalidStateError(
             f"Expected {opcode} notification, but get {response_opcode}"
@@ -354,23 +354,20 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
 
   _PROXY = TypeVar("_PROXY", bound=gatt_client.ProfileServiceProxy)
 
-  async def _make_service_clients(
-      self, proxy_class: type[_PROXY]
-  ) -> list[_PROXY]:
+  async def _make_service_client(
+      self, ref: device.Device, proxy_class: type[_PROXY]
+  ) -> _PROXY:
     self.logger.info("[REF] Connect %s", proxy_class.__name__)
-    clients = []
-    for ref in self.refs:
-      ref_dut_acl = ref.device.find_connection_by_bd_addr(
-          hci.Address(self.dut.address), transport=core.BT_LE_TRANSPORT
-      )
-      if not ref_dut_acl:
-        self.fail("No ACL connection found")
-      async with device.Peer(ref_dut_acl) as peer:
-        client = peer.create_service_proxy(proxy_class)
-        if not client:
-          self.fail("Failed to connect %s", proxy_class.__name__)
-        clients.append(client)
-    return clients
+    ref_dut_acl = ref.find_connection_by_bd_addr(
+        hci.Address(self.dut.address), transport=core.BT_LE_TRANSPORT
+    )
+    if not ref_dut_acl:
+      self.fail("No ACL connection found")
+    async with device.Peer(ref_dut_acl) as peer:
+      client = peer.create_service_proxy(proxy_class)
+      if not client:
+        self.fail("Failed to connect %s", proxy_class.__name__)
+      return client
 
   @override
   async def async_setup_class(self) -> None:
@@ -379,15 +376,13 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
       raise signals.TestAbortClass("Unicast client is not enabled")
 
     if (
-        self.dut.getprop(_AndroidProperty.LEAUDIO_BYPASS_ALLOW_LIST) != "true"
-        and not self.dut.device.is_emulator
-    ):
-      # Allow list will not be used in the test, but here we still check if the
-      # allow list is empty to make sure DUT is ready to use LE Audio.
-      if not self.dut.getprop(_AndroidProperty.LEAUDIO_ALLOW_LIST):
-        raise signals.TestAbortClass(
-            "Allow list is empty, DUT is probably not ready to use LE Audio."
+        self.dut.bt.getSdkVersion() >= 35
+        and android_constants.AudioDeviceType.BLE_HEADSET
+        not in self.dut.bt.getSupportedAudioDeviceTypes(
+            android_constants.AudioDeviceRole.OUTPUT
         )
+    ):
+      raise signals.TestAbortClass("Device does not support LE Audio.")
 
     self.dut_vcp_enabled = (
         self.dut.getprop(_AndroidProperty.VCP_CONTROLLER_ENABLED) == "true"
@@ -407,8 +402,10 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
         ):
           raise signals.TestAbortClass("REF does not support CIS peripheral")
 
-    # Disable the allow list to allow the connect LE Audio to Bumble.
-    self.dut.setprop(_AndroidProperty.LEAUDIO_BYPASS_ALLOW_LIST, "true")
+    self.setprop_for_class_context(
+        _AndroidProperty.LEAUDIO_BYPASS_ALLOW_LIST, "true"
+    )
+
     # Always repeat audio to avoid audio stopping.
     self.dut.bt.audioSetRepeat(android_constants.RepeatMode.ONE)
 
@@ -964,12 +961,17 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
 
     async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
       self.logger.info("[REF] Connect GMCS")
-      ref_mcp_clients = await self._make_service_clients(
-          _GenericMediaControlServiceProxy
-      )
+      ref_mcp_clients = await asyncio.gather(*[
+          self._make_service_client(
+              ref.device, _GenericMediaControlServiceProxy
+          )
+          for ref in self.refs
+      ])
       self.logger.info("[REF] Subscribe MCP characteristics")
-      for ref_mcp_client in ref_mcp_clients:
-        await ref_mcp_client.subscribe_characteristics()
+      await asyncio.gather(*[
+          ref_mcp_client.subscribe_characteristics()
+          for ref_mcp_client in ref_mcp_clients
+      ])
 
     media_states = [
         await gatt_helper.MutableCharacteristicState.create(
@@ -1036,12 +1038,17 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
 
     async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
       self.logger.info("[REF] Connect TBS")
-      ref_tbs_clients = await self._make_service_clients(
-          ccp.GenericTelephoneBearerServiceProxy
-      )
+      ref_tbs_clients = await asyncio.gather(*[
+          self._make_service_client(
+              ref.device, ccp.GenericTelephoneBearerServiceProxy
+          )
+          for ref in self.refs
+      ])
       self.logger.info("[REF] Read and subscribe TBS characteristics")
-      for ref_tbs_client in ref_tbs_clients:
-        await ref_tbs_client.read_and_subscribe_characteristics()
+      await asyncio.gather(*[
+          ref_tbs_client.read_and_subscribe_characteristics()
+          for ref_tbs_client in ref_tbs_clients
+      ])
 
     expected_call_index = 1
     call = self.dut.bl4a.make_phone_call(

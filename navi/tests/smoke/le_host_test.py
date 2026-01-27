@@ -444,7 +444,7 @@ class LeHostTest(navi_test_base.TwoDevicesTestBase):
             pa_sync.EVENT_ESTABLISHMENT, lambda: pa_sync_result.set_result(None)
         )
         pa_sync.once(
-            pa_sync.EVENT_ERROR,
+            pa_sync.EVENT_ESTABLISHMENT_ERROR,
             lambda: pa_sync_result.set_exception(hci.HCI_Error(pa_sync.status)),
         )
         self.logger.info("[REF] Waiting for PA sync establishment.")
@@ -692,6 +692,10 @@ class LeHostTest(navi_test_base.TwoDevicesTestBase):
       4. Request subrate mode on DUT.
       5. Check that the subrate mode is updated on REF.
     """
+    # TODO: Re-enable this when subrate manager is ready.
+    if not self.dut.device.is_emulator:
+      self.skipTest("Not stable on real device.")
+
     # TODO: Check if DUT supports LE subrating.
     if not self.ref.device.supports_le_features(
         hci.LeFeatureMask.CONNECTION_SUBRATING

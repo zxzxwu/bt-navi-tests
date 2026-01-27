@@ -34,7 +34,7 @@ class BluetoothHidHostSnippet : Snippet {
   private val context = instrumentation.targetContext
   private val broadcastReceivers = mutableMapOf<String, BroadcastReceiver>()
   private val bluetoothAdapter = context.getSystemService(BluetoothManager::class.java).adapter
-  private val proxy = Utils.getProfileProxy<BluetoothHidHost>(context, BluetoothProfile.HID_HOST)
+  private val proxy = Utils.getProfileProxy(context, BluetoothProfile.HID_HOST) as BluetoothHidHost
 
   init {
     instrumentation.uiAutomation.adoptShellPermissionIdentity()

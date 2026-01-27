@@ -21,7 +21,7 @@ import decimal
 import struct
 import sys
 import tempfile
-from typing import TYPE_CHECKING, TypeAlias
+from typing import TypeAlias
 import wave
 
 from bumble import core
@@ -45,17 +45,8 @@ from navi.utils import android_constants
 from navi.utils import audio
 from navi.utils import bl4a_api
 from navi.utils import constants
+from navi.utils import lc3
 from navi.utils import pyee_extensions
-
-# pylint: disable=g-import-not-at-top
-if TYPE_CHECKING:
-  from navi.utils import lc3  # pylint: disable=g-bad-import-order
-else:
-  try:
-    # LC3 may not be present in the external repo.
-    from navi.utils import lc3
-  except ImportError:
-    lc3 = None
 
 
 _DEFAUILT_ADVERTISING_PARAMETERS = device.AdvertisingParameters(
@@ -98,8 +89,6 @@ async def _wait_for_ase_state(
 
 def decoder_for_ase(ase: ascs.AudioStreamEndpointCharacteristic) -> lc3.Decoder:
   """Returns the decoder for the ASE."""
-  if not lc3:
-    raise RuntimeError("LC3 is not available")
   codec_config = ase.codec_specific_configuration
   assert isinstance(codec_config, bap.CodecSpecificConfiguration)
   assert codec_config.frame_duration is not None
@@ -183,15 +172,13 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
       raise signals.TestAbortClass("Unicast client is not enabled")
 
     if (
-        self.dut.getprop(_AndroidProperty.LEAUDIO_BYPASS_ALLOW_LIST) != "true"
-        and not self.dut.getprop(_AndroidProperty.LEAUDIO_ALLOW_LIST)
-        and self.dut.bt.getHardware() != "cutf_cvm"
+        self.dut.bt.getSdkVersion() >= 35
+        and android_constants.AudioDeviceType.BLE_HEADSET
+        not in self.dut.bt.getSupportedAudioDeviceTypes(
+            android_constants.AudioDeviceRole.OUTPUT
+        )
     ):
-      # Allow list will not be used in the test, but here we still check if the
-      # allow list is empty to make sure DUT is ready to use LE Audio.
-      raise signals.TestAbortClass(
-          "Allow list is empty, DUT is probably not ready to use LE Audio."
-      )
+      raise signals.TestAbortClass("Device does not support LE Audio.")
 
     self.ref.config.cis_enabled = True
     self.ref.device.cis_enabled = True
@@ -205,11 +192,14 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
         self.dut.getprop(_AndroidProperty.CCP_SERVER_ENABLED) == "true"
     )
 
+    self.setprop_for_class_context(
+        _AndroidProperty.LEAUDIO_BYPASS_ALLOW_LIST, "true"
+    )
+
   @override
   async def async_setup_test(self) -> None:
-    # Disable the allow list to allow the connect LE Audio to Bumble.
-    self.dut.setprop(_AndroidProperty.LEAUDIO_BYPASS_ALLOW_LIST, "true")
     await super().async_setup_test()
+
     self._setup_unicast_server()
     # Reset audio attributes to media.
     self.dut.bl4a.set_audio_attributes(
@@ -224,6 +214,7 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
     await asyncio.to_thread(self.dut.bt.audioStop)
     # Reset to the default value.
     self.dut.bt.setHandleAudioBecomingNoisy(False)
+    self.dut.bt.setAudioPlaybackOffload(False)
     await super().async_teardown_test()
 
   def _get_sampling_frequency(
@@ -320,7 +311,7 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
 
     # Setup audio sink.
     sink_frames = list[bytes]()
-    decoder = decoder_for_ase(sink_ase) if lc3 else None
+    decoder = decoder_for_ase(sink_ase) if lc3.AVAILABLE else None
 
     def sink(pdu: hci.HCI_IsoDataPacket):
       if pdu.iso_sdu_fragment:
@@ -345,7 +336,7 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
 
     if self.user_params.get(navi_test_base.RECORD_FULL_DATA):
       self.write_test_output_data("sink.lc3", b"".join(sink_frames))
-    if lc3 and decoder and audio.SUPPORT_AUDIO_PROCESSING:
+    if lc3.AVAILABLE and decoder and audio.SUPPORT_AUDIO_PROCESSING:
       pcm_format = lc3.PcmFormat.SIGNED_16
       decoded_frames = [
           decoder.decode(frame, pcm_format) for frame in sink_frames
@@ -359,6 +350,16 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
       )
       self.logger.info("dominant_frequency: %.2f", dominant_frequency)
       self.assertAlmostEqual(dominant_frequency, 1000, delta=10)
+
+  async def test_unidirectional_audio_stream_offloaded(self) -> None:
+    """Tests unidirectional audio stream with offloaded playback between DUT and REF.
+
+    Test steps:
+      1. Set AudioPlaybackOffload to true.
+      2. utilize test_unidirectional_audio_stream
+    """
+    self.dut.bt.setAudioPlaybackOffload(True)
+    await self.test_unidirectional_audio_stream()
 
   async def test_gaming_context(self) -> None:
     """Tests streaming with gaming context.
@@ -543,7 +544,7 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
 
       # Setup audio sink.
       sink_frames = list[bytes]()
-      decoder = decoder_for_ase(sink_ase) if lc3 else None
+      decoder = decoder_for_ase(sink_ase) if lc3.AVAILABLE else None
 
       def sink(pdu: hci.HCI_IsoDataPacket):
         if pdu.iso_sdu_fragment:
@@ -571,7 +572,7 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
 
     if self.user_params.get(navi_test_base.RECORD_FULL_DATA):
       self.write_test_output_data("sink.lc3", b"".join(sink_frames))
-    if lc3 and decoder and audio.SUPPORT_AUDIO_PROCESSING:
+    if lc3.AVAILABLE and decoder and audio.SUPPORT_AUDIO_PROCESSING:
       pcm_format = lc3.PcmFormat.SIGNED_16
       decoded_frames = [
           decoder.decode(frame, pcm_format) for frame in sink_frames
@@ -1108,7 +1109,7 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
         self.logger.info("[REF] Wait for call info change")
         await ref_tbs_client.bearer_list_current_calls.wait_for_target_value(
             lambda value: (
-                (info_list := ccp.CallInfo.parse_list(value))
+                bool(info_list := ccp.CallInfo.parse_list(value))
                 and (info_list[0].call_index == 1)
                 and (info_list[0].call_state in expected_call_states)
                 and (info_list[0].call_flags == expected_call_flag)

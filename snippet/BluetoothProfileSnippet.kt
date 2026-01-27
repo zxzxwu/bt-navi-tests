@@ -93,8 +93,13 @@ class BluetoothProfileSnippet : Snippet {
 
   /** Sets active device of [profile] to device in [address]. */
   @Rpc(description = "Set active device of profiles.")
-  fun setActiveDevice(address: String, profiles: Int): Boolean =
-    bluetoothAdapter.setActiveDevice(bluetoothAdapter.getRemoteDevice(address), profiles)
+  fun setActiveDevice(address: String?, profiles: Int): Boolean {
+    if (address != null) {
+      return bluetoothAdapter.setActiveDevice(bluetoothAdapter.getRemoteDevice(address), profiles)
+    } else {
+      return bluetoothAdapter.removeActiveDevice(profiles)
+    }
+  }
 
   companion object {
     val STATE_CHANGE_ACTIONS =

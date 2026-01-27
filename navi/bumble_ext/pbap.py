@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import dataclasses
 import enum
-from typing import Self, Tuple
+from typing import Self
 import uuid
 
 from bumble import core
@@ -113,9 +113,7 @@ class ApplicationParameter:
     return self.to_bytes()
 
   @classmethod
-  def parse_from(
-      cls: type[Self], data: bytes, offset: int = 0
-  ) -> Tuple[Self, int]:
+  def parse_from(cls, data: bytes, offset: int = 0) -> tuple[Self, int]:
     """Creates an application parameter from the given bytes."""
     tag = cls.Tag(data[offset])
     length = data[offset + 1]
@@ -149,7 +147,7 @@ class ApplicationParameters:
   pbap_supported_features: int | None = None
 
   @classmethod
-  def from_bytes(cls: type[Self], data: bytes) -> Self:
+  def from_bytes(cls, data: bytes) -> Self:
     """Parses a list of application parameters from the given bytes."""
     offset = 0
     instance = cls()

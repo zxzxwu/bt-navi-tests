@@ -436,13 +436,13 @@ class HID(abc.ABC, utils.EventEmitter):
     if not self.control_channel:
       raise core.InvalidStateError("Control channel is not connected")
     logger.debug(">>> [Control] %s", message)
-    self.control_channel.send_pdu(message)
+    self.control_channel.write(bytes(message))
 
   def _send_interrupt_pdu(self, message: Message) -> None:
     if not self.interrupt_channel:
       raise core.InvalidStateError("Interrupt channel is not connected")
     logger.debug(">>> [Interrupt] %s", message)
-    self.interrupt_channel.send_pdu(message)
+    self.interrupt_channel.write(bytes(message))
 
   def send_interrupt_data(self, data: bytes) -> None:
     if self.role == HID.Role.HOST:

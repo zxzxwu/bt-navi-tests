@@ -29,7 +29,7 @@ class BluetoothAshaSnippet : Snippet {
   private val instrumentation = InstrumentationRegistry.getInstrumentation()
   private val context = instrumentation.targetContext
   private val proxy =
-    Utils.getProfileProxy<BluetoothHearingAid>(context, BluetoothProfile.HEARING_AID)
+    Utils.getProfileProxy(context, BluetoothProfile.HEARING_AID) as BluetoothHearingAid
   private val broadcastReceivers = mutableMapOf<String, BroadcastReceiver>()
   private val bluetoothAdapter = context.getSystemService(BluetoothManager::class.java).adapter
 

@@ -48,9 +48,8 @@ class AshaTest(navi_test_base.TwoDevicesTestBase):
   async def async_setup_class(self) -> None:
     await super().async_setup_class()
 
-    # Force enabling ASHA Central on emulator.
     if self.dut.device.is_emulator:
-      self.dut.setprop(_PROPERTY_ASHA_CENTRAL_ENABLED, "true")
+      self.setprop_for_class_context(_PROPERTY_ASHA_CENTRAL_ENABLED, "true")
 
     if self.dut.getprop(_PROPERTY_ASHA_CENTRAL_ENABLED) != "true":
       raise signals.TestAbortClass("ASHA Central is disabled.")
@@ -58,12 +57,16 @@ class AshaTest(navi_test_base.TwoDevicesTestBase):
   @override
   async def async_setup_test(self) -> None:
     await super().async_setup_test()
+
+    self.logger.info("[REF] Add ASHA service.")
     self.ref_asha_service = asha.AshaService(
         capability=asha.DeviceCapabilities(0),
         hisyncid=secrets.token_bytes(8),
         device=self.ref.device,
     )
     self.ref.device.add_service(self.ref_asha_service)
+
+    self.logger.info("[REF] Set advertising data.")
     self.ref.device.advertising_data = (
         self.ref_asha_service.get_advertising_data()
     )
@@ -84,9 +87,10 @@ class AshaTest(navi_test_base.TwoDevicesTestBase):
 
     Test steps:
       1. Pair with REF.
-      2. Verify ASHA is connected.
+      2. Verify ASHA is active.
     """
     await self._setup_paired_devices()
+
     self.assertIn(
         self.ref.random_address,
         self.dut.bt.getActiveDevices(android_constants.Profile.HEARING_AID),
@@ -109,12 +113,13 @@ class AshaTest(navi_test_base.TwoDevicesTestBase):
     )
     if ref_dut_acl is None:
       self.fail("No ACL connection found.")
+
     self.logger.info("[REF] Disconnect")
     await ref_dut_acl.disconnect()
 
     with self.dut.bl4a.register_callback(bl4a_api.Module.ASHA) as dut_cb:
+      self.logger.info("[REF] Start advertising")
       async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):
-        self.logger.info("[REF] Start advertising")
         await self.ref.device.create_advertising_set(
             advertising_data=self.ref_asha_service.get_advertising_data(),
             advertising_parameters=bumble_device.AdvertisingParameters(
@@ -139,18 +144,20 @@ class AshaTest(navi_test_base.TwoDevicesTestBase):
 
     Test steps:
       1. Establish ASHA connection.
-      2. (Optional) Start phone call.
+      2. (VOICE_COMMUNICATION only) Start phone call.
       3. Start streaming.
-      4. Verify audio data is received.
+      4. Verify audio is started on REF.
       5. Stop streaming.
+      6. Verify audio is stopped on REF.
 
     Args:
-      usage: The type of stream to test.
+      usage: The usage of stream to test.
     """
     await self._setup_paired_devices()
 
     sink_buffer = bytearray()
     self.ref_asha_service.audio_sink = sink_buffer.extend
+
     watcher = pyee_extensions.EventWatcher()
     start_events = watcher.async_monitor(
         self.ref_asha_service, asha.AshaService.Event.STARTED
@@ -169,20 +176,25 @@ class AshaTest(navi_test_base.TwoDevicesTestBase):
                 direction=constants.Direction.OUTGOING,
             )
         )
+
+      self.logger.info("[DUT] Set audio attributes.")
       self.dut.bl4a.set_audio_attributes(
           bl4a_api.AudioAttributes(usage=usage), handle_audio_focus=False
       )
 
       self.logger.info("[DUT] Start streaming")
       await asyncio.to_thread(self.dut.bt.audioPlaySine)
+
+      self.logger.info("[REF] Wait for audio started")
       async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):
-        self.logger.info("[REF] Wait for audio started")
         await start_events.get()
 
+      # Stream for 1 second.
       await asyncio.sleep(_STREAMING_TIME_SECONDS)
 
       self.logger.info("[DUT] Stop streaming")
       await asyncio.to_thread(self.dut.bt.audioStop)
+
       async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):
         self.logger.info("[REF] Wait for audio stopped")
         await stop_events.get()
@@ -207,25 +219,27 @@ class AshaTest(navi_test_base.TwoDevicesTestBase):
 
     Test steps:
       1. Establish ASHA connection.
-      2. Set volume to value from min to max.
-      3. Verify volume is propagated to REF.
+      2. Set volume from min volume to max volume.
+      3. Verify volume on REF.
     """
     await self._setup_paired_devices()
 
-    ref_volumes = pyee_extensions.EventTriggeredValueObserver(
-        self.ref_asha_service,
+    ref_volumes = asyncio.Queue[int | None]()
+    self.ref_asha_service.on(
         asha.AshaService.Event.VOLUME_CHANGED,
-        lambda: self.ref_asha_service.volume,
+        lambda: ref_volumes.put_nowait(self.ref_asha_service.volume),
     )
 
     for volume in range(_ASHA_MIN_VOLUME, _ASHA_MAX_VOLUME + 1):
-
       async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):
         self.logger.info("[DUT] Set volume to %s", volume)
         self.dut.bt.setAshaVolume(volume)
 
         self.logger.info("[REF] Wait for volume to be %s", volume)
-        await ref_volumes.wait_for_target_value(volume)
+        # System may change the volume. Check if target volume is reached once.
+        while True:
+          if await ref_volumes.get() == volume:
+            break
 
 
 if __name__ == "__main__":
