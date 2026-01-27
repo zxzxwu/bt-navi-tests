@@ -94,7 +94,6 @@ class Module(enum.Enum):
   PLAYER = enum.auto()
   BQR = enum.auto()
   A2DP_SINK = enum.auto()
-  AVRCP_CONTROLLER = enum.auto()
   HAP_CLIENT = enum.auto()
   VOLUME_CONTROL = enum.auto()
 
@@ -191,11 +190,6 @@ class CallbackHandler:
       case Module.A2DP_SINK:
         handler = snippet.registerProfileCallback(
             android_constants.Profile.A2DP_SINK
-        )
-        on_close = snippet.unregisterProfileCallback
-      case Module.AVRCP_CONTROLLER:
-        handler = snippet.registerProfileCallback(
-            android_constants.Profile.AVRCP_CONTROLLER
         )
         on_close = snippet.unregisterProfileCallback
       case Module.HAP_CLIENT:
