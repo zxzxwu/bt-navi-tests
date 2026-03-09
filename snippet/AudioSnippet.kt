@@ -45,6 +45,7 @@ import com.google.android.mobly.snippet.rpc.AsyncRpc
 import com.google.android.mobly.snippet.rpc.Rpc
 import com.google.android.mobly.snippet.rpc.RpcOptional
 import com.google.android.mobly.snippet.rpc.RunOnUiThread
+import com.google.wireless.android.pixel.bluetooth.snippet.JsonObjectConverter.Companion.toJson
 import com.google.wireless.android.pixel.bluetooth.snippet.Utils.postSnippetEvent
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
@@ -207,9 +208,7 @@ class AudioSnippet : Snippet {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
           Log.d(TAG, "onMediaItemTransition: $mediaItem, $reason")
           postSnippetEvent(callbackId, SnippetConstants.PLAYER_MEDIA_ITEM_TRANSITION) {
-            mediaItem?.localConfiguration?.uri.let {
-              putString(SnippetConstants.URI, it.toString())
-            }
+            putParcelable(SnippetConstants.MEDIA_ITEM, mediaItem?.toJson())
           }
         }
 
@@ -223,6 +222,20 @@ class AudioSnippet : Snippet {
             putLong(SnippetConstants.OLD_POSITION, oldPosition.positionMs)
             putLong(SnippetConstants.NEW_POSITION, newPosition.positionMs)
             putInt(SnippetConstants.FIELD_REASON, reason)
+          }
+        }
+
+        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+          Log.d(TAG, "onShuffleModeEnabledChanged: $shuffleModeEnabled")
+          postSnippetEvent(callbackId, SnippetConstants.PLAYER_SHUFFLE_MODE_ENABLED_CHANGED) {
+            putBoolean(SnippetConstants.FIELD_STATE, shuffleModeEnabled)
+          }
+        }
+
+        override fun onRepeatModeChanged(repeatMode: Int) {
+          Log.d(TAG, "onRepeatModeChanged: $repeatMode")
+          postSnippetEvent(callbackId, SnippetConstants.PLAYER_REPEAT_MODE_CHANGED) {
+            putInt(SnippetConstants.MODE, repeatMode)
           }
         }
       }
@@ -337,6 +350,15 @@ class AudioSnippet : Snippet {
     player.repeatMode = repeatMode
   }
 
+  /** Sets shuffle mode to [shuffleModeEnabled]. */
+  @Rpc(description = "Set shuffle mode")
+  @RunOnUiThread
+  fun setShuffleMode(shuffleModeEnabled: Boolean, @RpcOptional playerId: String? = null) {
+    val player =
+      players[playerId] ?: throw IllegalArgumentException("$playerId is not a valid player")
+    player.shuffleModeEnabled = shuffleModeEnabled
+  }
+
   /** Resumes playing audio. */
   @Rpc(description = "Resume playing audio")
   @RunOnUiThread
@@ -364,13 +386,24 @@ class AudioSnippet : Snippet {
     player.stop()
   }
 
+  /** Set a media item to the player. */
+  @Rpc(description = "Set a media item")
+  @RunOnUiThread
+  fun playMediaItem(mediaItem: MediaItem, @RpcOptional playerId: String? = null) {
+    val player =
+      players[playerId] ?: throw IllegalArgumentException("$playerId is not a valid player")
+    player.setMediaItem(mediaItem)
+    player.prepare()
+    player.play()
+  }
+
   /** Add a media item to the player. */
   @Rpc(description = "Add a media item")
   @RunOnUiThread
-  fun addMediaItem(fileUri: String, @RpcOptional playerId: String? = null) {
+  fun addMediaItem(mediaItem: MediaItem, @RpcOptional playerId: String? = null) {
     val player =
       players[playerId] ?: throw IllegalArgumentException("$playerId is not a valid player")
-    player.addMediaItem(MediaItem.fromUri(fileUri))
+    player.addMediaItem(mediaItem)
   }
 
   /** Add a new player. */
@@ -477,35 +510,6 @@ class AudioSnippet : Snippet {
     } ?: throw IllegalArgumentException("$outputPath is not recording")
   }
 
-  /**
-   * Enables SCO route to Bluetooth SCO device with [address]. If address is not passed, sets the
-   * active device to the first SCO device.
-   */
-  @Rpc(description = "Enable SCO route")
-  @RunOnUiThread
-  fun audioSetRouteSco(@RpcOptional address: String?, @RpcOptional playerId: String? = null) {
-    val player =
-      players[playerId] ?: throw IllegalArgumentException("$playerId is not a valid player")
-    audioManager.availableCommunicationDevices
-      .first {
-        it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO && (it.address == address || address == null)
-      }
-      .let { audioDevice ->
-        audioManager.setCommunicationDevice(audioDevice)
-        player.setPreferredAudioDevice(audioDevice)
-      }
-  }
-
-  /** Sets audio route to default. */
-  @Rpc(description = "Set audio route to default")
-  @RunOnUiThread
-  fun audioSetRouteDefault(@RpcOptional playerId: String? = null) {
-    val player =
-      players[playerId] ?: throw IllegalArgumentException("$playerId is not a valid player")
-    audioManager.clearCommunicationDevice()
-    player.setPreferredAudioDevice(null)
-  }
-
   /** Gets the currently selected communication device. */
   @Rpc(description = "Get the currently selected communication device")
   fun getCommunicationDevice(): Bundle? {
@@ -515,6 +519,23 @@ class AudioSnippet : Snippet {
         putInt(SnippetConstants.FIELD_TYPE, device.type)
       }
     }
+  }
+
+  /** Sets the communication device to [type] and [address]. */
+  @Rpc(description = "Set the communication device")
+  fun setCommunicationDevice(
+    @RpcOptional type: Int? = null,
+    @RpcOptional address: String? = null,
+  ): Boolean {
+    if (type == null && address == null) {
+      audioManager.clearCommunicationDevice()
+      return true
+    }
+    val device =
+      audioManager.availableCommunicationDevices.firstOrNull {
+        (type == null || it.type == type) && (address == null || it.address == address)
+      } ?: throw IllegalArgumentException("Device not found")
+    return audioManager.setCommunicationDevice(device)
   }
 
   /** Checks if spatializer is available. */
@@ -599,6 +620,10 @@ class AudioSnippet : Snippet {
   @Rpc(description = "Get the supported audio device types")
   fun getSupportedAudioDeviceTypes(direction: Int): Set<Int> =
     audioManager.getSupportedDeviceTypes(direction)
+
+  /** Checks if volume is fixed. */
+  @Rpc(description = "Check if volume is fixed")
+  fun isVolumeFixed(): Boolean = audioManager.isVolumeFixed
 
   private companion object {
     const val TAG = "AudioSnippet"

@@ -22,6 +22,7 @@ import struct
 from typing import TypeAlias
 
 from bumble import colors
+from bumble import data_types
 from bumble import device
 from bumble import gatt
 from bumble import gatt_adapters
@@ -36,6 +37,33 @@ logger = logging.getLogger(__name__)
 AudioRole = ascs.AudioRole
 AseResponseCode = ascs.AseResponseCode
 AseReasonCode = ascs.AseReasonCode
+
+
+def make_bap_announcement(
+    announcement_type: bap.AnnouncementType,
+    available_audio_contexts: bap.ContextType = bap.ContextType(0xFFFF),
+    metadata: bytes = b'',
+) -> data_types.ServiceData16BitUUID:
+  """Make BAP announcement service data."""
+  return data_types.ServiceData16BitUUID(
+      gatt.GATT_AUDIO_STREAM_CONTROL_SERVICE,
+      struct.pack(
+          '<BIB',
+          announcement_type,
+          available_audio_contexts,
+          len(metadata),
+      )
+      + metadata,
+  )
+
+
+def make_cap_announcement(
+    announcement_type: bap.AnnouncementType,
+) -> data_types.ServiceData16BitUUID:
+  """Make CAP announcement service data."""
+  return data_types.ServiceData16BitUUID(
+      gatt.GATT_COMMON_AUDIO_SERVICE, bytes([announcement_type])
+  )
 
 
 class AudioStreamEndpointCharacteristic(gatt.Characteristic):
@@ -221,6 +249,8 @@ class AudioStreamEndpointCharacteristic(gatt.Characteristic):
         ),
         None,
     ):
+      # Notify state change to ENABLING before transferring to STREAMING.
+      await self.service.device.notify_subscribers(self, self.data_value)
       await self.on_cis_establishment(cis_link)
 
     return (ascs.AseResponseCode.SUCCESS, ascs.AseReasonCode.NONE)

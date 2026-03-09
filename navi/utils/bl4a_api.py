@@ -301,10 +301,8 @@ class CallbackHandler:
 
 
 @dataclasses.dataclass
-class JsonDeserializableEvent:
+class JsonDeserializable:
   """Base class for JSON deserializable objects."""
-
-  EVENT_NAME: ClassVar[str]
 
   @classmethod
   def from_mapping(cls: type[Self], mapping: Mapping[str, Any]) -> Self:
@@ -323,6 +321,12 @@ class JsonDeserializableEvent:
       mapper = field.metadata.get(_MAPPER, lambda x: x)
       kwargs[field.name] = mapper(value) if value is not None else None
     return cls(**kwargs)
+
+
+class JsonDeserializableEvent(JsonDeserializable):
+  """Base class for JSON deserializable events."""
+
+  EVENT_NAME: ClassVar[str]
 
 
 @dataclasses.dataclass
@@ -409,13 +413,19 @@ class GattService:
   Attributes:
     uuid: Service UUID in string format.
     characteristics: A list of GATT Characteristics included in this service.
+    type: Service type, PRIMARY or SECONDARY.
     handle: Service handle. In GATT server mode, this attribute might be ignored
       by the API.
+    included_services: A list of GATT Services included in this service.
   """
 
   uuid: str
   characteristics: Sequence[GattCharacteristic] = ()
+  type: android_constants.GattServiceType = (
+      android_constants.GattServiceType.PRIMARY
+  )
   handle: int | None = None
+  included_services: Sequence[GattService] = ()
 
   @classmethod
   def from_mapping(cls, mapping: Mapping[str, Any]) -> GattService:
@@ -430,11 +440,20 @@ class GattService:
     return GattService(
         uuid=mapping[snippet_constants.FIELD_UUID],
         handle=mapping[snippet_constants.FIELD_HANDLE],
+        type=android_constants.GattServiceType(
+            mapping[snippet_constants.GATT_FIELD_TYPE]
+        ),
         characteristics=[
             GattCharacteristic.from_mapping(characteristic)
             for characteristic in mapping[
                 snippet_constants.GATT_FIELD_CHARACTERISTICS
             ]
+        ],
+        included_services=[
+            GattService.from_mapping(included_service)
+            for included_service in mapping.get(
+                snippet_constants.GATT_FIELD_INCLUDED_SERVICES, []
+            )
         ],
     )
 
@@ -543,6 +562,36 @@ class BondStateChanged(JsonDeserializableEvent):
 
 
 @dataclasses.dataclass
+class EncryptionChanged(JsonDeserializableEvent):
+  """android.bluetooth.device.action.ENCRYPTION_CHANGED.
+
+  Attributes:
+    address: mac address of remote device in string format.
+  """
+
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+
+  EVENT_NAME = snippet_constants.ENCRYPTION_CHANGE
+
+
+@dataclasses.dataclass
+class KeyMissing(JsonDeserializableEvent):
+  """android.bluetooth.device.action.KEY_MISSING.
+
+  Attributes:
+    address: mac address of remote device in string format.
+  """
+
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+
+  EVENT_NAME = snippet_constants.KEY_MISSING
+
+
+@dataclasses.dataclass
 class UuidChanged(JsonDeserializableEvent):
   """android.bluetooth.device.action.UUID."""
 
@@ -574,6 +623,81 @@ class A2dpPlayingStateChanged(JsonDeserializableEvent):
 
 
 @dataclasses.dataclass
+class A2dpCodecConfiguration(JsonDeserializable):
+  """android.bluetooth.BluetoothCodecConfig."""
+
+  @dataclasses.dataclass
+  class ExtendedCodecType(JsonDeserializable):
+    """Extended Codec Type."""
+
+    id: int = dataclasses.field(metadata={_FIELD: snippet_constants.FIELD_ID})
+    name: str = dataclasses.field(
+        metadata={_FIELD: snippet_constants.FIELD_NAME}
+    )
+    codec_type: int | None = dataclasses.field(
+        default=None,
+        metadata={_FIELD: snippet_constants.CODEC_TYPE},
+    )
+
+  codec_type: android_constants.A2dpCodecType | None = dataclasses.field(
+      default=None,
+      metadata={
+          _FIELD: snippet_constants.CODEC_TYPE,
+          _MAPPER: android_constants.A2dpCodecType,
+      },
+  )
+  channel_mode: android_constants.A2dpChannelMode | None = dataclasses.field(
+      default=None,
+      metadata={
+          _FIELD: snippet_constants.CHANNEL_MODE,
+          _MAPPER: android_constants.A2dpChannelMode,
+      },
+  )
+  priority: int | None = dataclasses.field(
+      default=None, metadata={_FIELD: snippet_constants.PRIORITY}
+  )
+  extended_codec_type: ExtendedCodecType | None = dataclasses.field(
+      default=None,
+      metadata={
+          _FIELD: snippet_constants.EXTENDED_CODEC_TYPE,
+          _MAPPER: ExtendedCodecType.from_mapping,
+      },
+  )
+  sample_rate: android_constants.A2dpSampleRate | None = dataclasses.field(
+      default=None,
+      metadata={
+          _FIELD: snippet_constants.SAMPLE_RATE,
+          _MAPPER: android_constants.A2dpSampleRate,
+      },
+  )
+  bits_per_sample: android_constants.A2dpBitsPerSample | None = (
+      dataclasses.field(
+          default=None,
+          metadata={
+              _FIELD: snippet_constants.BITS_PER_SAMPLE,
+              _MAPPER: android_constants.A2dpBitsPerSample,
+          },
+      )
+  )
+  codec_specific_1: int | None = dataclasses.field(
+      default=None,
+      metadata={_FIELD: snippet_constants.CODEC_SPECIFIC_1},
+  )
+  codec_specific_2: int | None = dataclasses.field(
+      default=None,
+      metadata={_FIELD: snippet_constants.CODEC_SPECIFIC_2},
+  )
+  codec_specific_3: int | None = dataclasses.field(
+      default=None,
+      metadata={_FIELD: snippet_constants.CODEC_SPECIFIC_3},
+  )
+  codec_specific_4: int | None = dataclasses.field(
+      default=None,
+      metadata={_FIELD: snippet_constants.CODEC_SPECIFIC_4},
+  )
+
+
+@dataclasses.dataclass
 class A2dpCodecConfigChanged(JsonDeserializableEvent):
   """android.bluetooth.a2dp.profile.action.CODEC_CONFIG_CHANGED."""
 
@@ -582,10 +706,10 @@ class A2dpCodecConfigChanged(JsonDeserializableEvent):
   address: str = dataclasses.field(
       metadata={_FIELD: snippet_constants.FIELD_DEVICE}
   )
-  codec_type: android_constants.A2dpCodecType = dataclasses.field(
+  codec_config: A2dpCodecConfiguration = dataclasses.field(
       metadata={
-          _FIELD: snippet_constants.A2DP_FIELD_CODEC_TYPE,
-          _MAPPER: android_constants.A2dpCodecType,
+          _FIELD: snippet_constants.CODEC_TYPE,
+          _MAPPER: A2dpCodecConfiguration.from_mapping,
       }
   )
 
@@ -639,12 +763,17 @@ class DeviceFound(JsonDeserializableEvent):
   Attributes:
     address: mac address of remote device in string format.
     name: name of remote device.
+    rssi: RSSI of remote device.
   """
 
   address: str = dataclasses.field(
       metadata={_FIELD: snippet_constants.FIELD_DEVICE}
   )
   name: str = dataclasses.field(metadata={_FIELD: snippet_constants.FIELD_NAME})
+
+  rssi: int = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_RSSI, _MAPPER: int}
+  )
 
   EVENT_NAME = snippet_constants.DEVICE_FOUND
 
@@ -1055,7 +1184,32 @@ class PlayerMediaItemTransition(JsonDeserializableEvent):
 
   EVENT_NAME = snippet_constants.PLAYER_MEDIA_ITEM_TRANSITION
 
-  uri: str | None = dataclasses.field(metadata={_FIELD: snippet_constants.URI})
+  media_item: MediaItem = dataclasses.field(
+      metadata={
+          _FIELD: snippet_constants.MEDIA_ITEM,
+          _MAPPER: lambda kwargs: MediaItem(**kwargs),
+      }
+  )
+
+
+@dataclasses.dataclass
+class PlayerShuffleModeEnabledChanged(JsonDeserializableEvent):
+  """androidx.media3.common.Player.Listener.onShuffleModeEnabledChanged."""
+
+  EVENT_NAME = snippet_constants.PLAYER_SHUFFLE_MODE_ENABLED_CHANGED
+
+  enabled: bool = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_STATE}
+  )
+
+
+@dataclasses.dataclass
+class PlayerRepeatModeChanged(JsonDeserializableEvent):
+  """androidx.media3.common.Player.Listener.onRepeatModeChanged."""
+
+  EVENT_NAME = snippet_constants.PLAYER_REPEAT_MODE_CHANGED
+
+  mode: int = dataclasses.field(metadata={_FIELD: snippet_constants.MODE})
 
 
 @dataclasses.dataclass
@@ -1677,6 +1831,9 @@ class ExtendedAdvertisingSet:
           None
       ),
       periodic_advertising_data: AdvertisingData | None = (None),
+      duration: int = 0,
+      max_extended_advertising_events: int = 0,
+      gatt_server: GattServer | None = None,
   ) -> Self:
     """Starts an Extended Advertising Set.
 
@@ -1687,10 +1844,17 @@ class ExtendedAdvertisingSet:
       scan_response: scan response.
       periodic_advertising_parameters: periodic advertising parameters.
       periodic_advertising_data: periodic advertising data.
+      duration: advertising duration in 10ms units, 0 for no limit.
+      max_extended_advertising_events: max extended advertising events, 0 for no
+        limit.
+      gatt_server: GATT server instance.
 
     Returns:
       advertiser instance.
     """
+    gatt_server_callback_id = (
+        gatt_server.handler.callback_id if gatt_server else None
+    )
     cookie = await asyncio.to_thread(
         lambda: snippet.startAdvertisingSet(
             _make_json_object(advertising_set_parameters),
@@ -1698,6 +1862,9 @@ class ExtendedAdvertisingSet:
             _make_json_object(scan_response),
             _make_json_object(periodic_advertising_parameters),
             _make_json_object(periodic_advertising_data),
+            duration,
+            max_extended_advertising_events,
+            gatt_server_callback_id,
         ),
     )
     return cls(cookie=cookie, snippet=snippet)
@@ -1777,14 +1944,17 @@ class AudioAttributes:
 
 
 @dataclasses.dataclass
-class MediaItemNode:
-  """Media3 Media Item Node for browsing."""
+class MediaItem:
+  """Media3 Media Item, with children field for browsing."""
 
-  id: str
-  title: str
-  browsable: bool = False
-  playable: bool = False
-  children: Sequence[MediaItemNode] = ()
+  id: str | None = None
+  title: str | None = None
+  artist: str | None = None
+  album: str | None = None
+  uri: str | None = None
+  browsable: bool | None = None
+  playable: bool | None = None
+  children: Sequence[MediaItem] = ()
 
 
 @dataclasses.dataclass
@@ -1905,6 +2075,135 @@ class PhoneCall:
   def close(self) -> None:
     """Closes the phone call."""
     self.snippet.disconnectCall(self.cookie)
+
+  def __enter__(self) -> Self:
+    return self
+
+  def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+    with contextlib.suppress(mobly.snippet.errors.ApiError):
+      self.close()
+
+
+@dataclasses.dataclass
+class MediaBrowser:
+  """Context managable Media Browser wrapper."""
+
+  snippet: snippet_stub.BluetoothSnippet
+  cookie: str
+
+  @dataclasses.dataclass
+  class PlaybackStateChanged(JsonDeserializableEvent):
+    """Media playback state changed event."""
+
+    state: android_constants.MediaPlaybackState = dataclasses.field(
+        metadata={
+            _FIELD: snippet_constants.FIELD_STATE,
+            _MAPPER: android_constants.MediaPlaybackState,
+        }
+    )
+    EVENT_NAME = snippet_constants.MEDIA_CONTROLLER_PLAYBACK_STATE_CHANGE
+
+  @dataclasses.dataclass
+  class MetadataChanged(JsonDeserializableEvent):
+    """Media metadata changed event."""
+
+    title: str | None = dataclasses.field(
+        metadata={
+            _FIELD: snippet_constants.FIELD_TITLE,
+        }
+    )
+    artist: str | None = dataclasses.field(
+        metadata={
+            _FIELD: snippet_constants.FIELD_ARTIST,
+        }
+    )
+    album: str | None = dataclasses.field(
+        metadata={
+            _FIELD: snippet_constants.FIELD_ALBUM,
+        }
+    )
+    EVENT_NAME = snippet_constants.MEDIA_CONTROLLER_METADATA_CHANGE
+
+  @dataclasses.dataclass
+  class ShuffleModeChanged(JsonDeserializableEvent):
+    """Browser shuffle mode changed event."""
+
+    mode: android_constants.ShuffleMode = dataclasses.field(
+        metadata={_FIELD: snippet_constants.MODE}
+    )
+    EVENT_NAME = snippet_constants.PLAYER_SHUFFLE_MODE_ENABLED_CHANGED
+
+  @dataclasses.dataclass
+  class RepeatModeChanged(JsonDeserializableEvent):
+    """Browser repeat mode changed event."""
+
+    mode: android_constants.RepeatMode = dataclasses.field(
+        metadata={_FIELD: snippet_constants.MODE}
+    )
+    EVENT_NAME = snippet_constants.PLAYER_REPEAT_MODE_CHANGED
+
+  async def get_root_media_item(self) -> str:
+    """Gets the root id."""
+
+    return await asyncio.to_thread(
+        lambda: self.snippet.getMediaBrowserRootId(self.cookie)
+    )
+
+  async def get_children(self, parent_id: str) -> list[MediaItem]:
+    """Gets the root id."""
+
+    children = await asyncio.to_thread(
+        lambda: self.snippet.getMediaBrowserChildren(self.cookie, parent_id)
+    )
+    return [MediaItem(**child) for child in children]
+
+  def close(self) -> None:
+    """Closes the phone call."""
+    self.snippet.disconnectMediaBrowser(self.cookie)
+
+  def play(self) -> None:
+    """Plays the media."""
+    self.snippet.playMediaController(self.cookie)
+
+  def pause(self) -> None:
+    """Pauses the media."""
+    self.snippet.pauseMediaController(self.cookie)
+
+  def stop(self) -> None:
+    """Stops the media."""
+
+    self.snippet.stopMediaController(self.cookie)
+
+  def fast_forward(self) -> None:
+    """Fast forwards the media."""
+    self.snippet.fastForwardMediaController(self.cookie)
+
+  def rewind(self) -> None:
+    """Rewinds the media."""
+    self.snippet.rewindMediaController(self.cookie)
+
+  def skip_to_next(self) -> None:
+    """Skips to the next media."""
+    self.snippet.skipToNextMediaController(self.cookie)
+
+  def skip_to_previous(self) -> None:
+    """Skips to the previous media."""
+    self.snippet.skipToPreviousMediaController(self.cookie)
+
+  def register_callback(self) -> CallbackHandler:
+    """Registers a media controller callback."""
+    handler = self.snippet.registerMediaControllerCallback(self.cookie)
+    return CallbackHandler(self.snippet, handler)
+
+  def set_repeat_mode(self, repeat_mode: android_constants.RepeatMode) -> None:
+    """Sets the repeat mode."""
+    self.snippet.setMediaControllerRepeatMode(self.cookie, repeat_mode)
+
+  def set_shuffle_mode(
+      self, shuffle_mode: android_constants.ShuffleMode
+  ) -> None:
+    """Sets the shuffle mode."""
+    self.snippet.setMediaControllerShuffleMode(self.cookie, shuffle_mode)
 
   def __enter__(self) -> Self:
     return self
@@ -2125,6 +2424,7 @@ class RfcommChannel:
     Raises:
       ConnectionError: RFCOMM is not connected after allowed retry counts.
     """
+
     @retry.retry_on_exception(
         initial_delay_sec=_DEFAULT_RETRY_DELAY_SECONDS,
         num_retries=retry_count,
@@ -3084,9 +3384,7 @@ class SnippetWrapper:
     Returns:
       The RFCOMM channel control block.
     """
-    return RfcommChannel.connect_async(
-        self.snippet, address, secure, uuid
-    )
+    return RfcommChannel.connect_async(self.snippet, address, secure, uuid)
 
   async def start_legacy_advertiser(
       self,
@@ -3120,6 +3418,9 @@ class SnippetWrapper:
           None
       ),
       periodic_advertising_data: AdvertisingData | None = (None),
+      duration: int = 0,
+      max_extended_advertising_events: int = 0,
+      gatt_server: GattServer | None = None,
   ) -> ExtendedAdvertisingSet:
     """Starts an extended advertising set.
 
@@ -3129,6 +3430,10 @@ class SnippetWrapper:
       scan_response: Scan response data.
       periodic_advertising_parameters: Periodic advertising parameters.
       periodic_advertising_data: Periodic advertising data.
+      duration: advertising duration in 10ms units, 0 for ignore.
+      max_extended_advertising_events: max extended advertising events, 0 for
+        ignore.
+      gatt_server: GATT server instance.
 
     Returns:
       The extended advertising set control block.
@@ -3140,6 +3445,9 @@ class SnippetWrapper:
         scan_response,
         periodic_advertising_parameters,
         periodic_advertising_data,
+        duration,
+        max_extended_advertising_events,
+        gatt_server,
     )
 
   async def start_le_audio_broadcast(
@@ -3300,7 +3608,7 @@ class SnippetWrapper:
     )
 
   def register_media_library_session(
-      self, media_tree_root: MediaItemNode
+      self, media_tree_root: MediaItem
   ) -> CallbackHandler:
     """Registers a media browser session."""
     return CallbackHandler(
@@ -3309,4 +3617,32 @@ class SnippetWrapper:
             _make_json_object(media_tree_root)
         ),
         on_close=self.snippet.unregisterMediaLibrarySession,
+    )
+
+  def connect_media_browser(
+      self, package_name: str, service_name: str
+  ) -> MediaBrowser:
+    """Connects to a media browser."""
+    return MediaBrowser(
+        snippet=self.snippet,
+        cookie=self.snippet.connectMediaBrowser(package_name, service_name),
+    )
+
+  def add_media_item(self, media_item: MediaItem) -> None:
+    """Adds a media item to the media queue."""
+
+    return self.snippet.addMediaItem(_make_json_object(media_item))
+
+  def play_media_item(self, media_item: MediaItem) -> None:
+    """Plays a media item."""
+
+    return self.snippet.playMediaItem(_make_json_object(media_item))
+
+  def set_a2dp_codec_config(
+      self, address: str, codec_config: A2dpCodecConfiguration
+  ) -> None:
+    """Sets the A2DP codec config."""
+
+    return self.snippet.setA2dpCodecConfig(
+        address, _make_json_object(codec_config)
     )

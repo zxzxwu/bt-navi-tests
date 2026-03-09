@@ -70,7 +70,11 @@ class ClassicGapTest(test_base.PerformanceTestBase):
             self.dut.bt.startInquiry()
 
             await dut_cb.wait_for_event(
-                bl4a_api.DeviceFound(address=self.ref.address, name=mock.ANY)
+                bl4a_api.DeviceFound(
+                    address=self.ref.address,
+                    name=mock.ANY,
+                    rssi=mock.ANY,
+                )
             )
           latency_seconds = stop_watch.elapsed_time.total_seconds()
           self.success_attempt_record(

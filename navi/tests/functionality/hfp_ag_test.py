@@ -75,17 +75,6 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
           timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
       )
 
-  async def _terminate_connection_from_dut(self) -> None:
-    with (self.dut.bl4a.register_callback(_Module.ADAPTER) as dut_cb,):
-      self.logger.info("[DUT] Terminate connection.")
-      self.dut.bt.disconnect(self.ref.address)
-      await dut_cb.wait_for_event(
-          bl4a_api.AclDisconnected(
-              address=self.ref.address,
-              transport=android_constants.Transport.CLASSIC,
-          ),
-      )
-
   async def _find_or_connect_acl_from_ref(
       self, dut_address: str
   ) -> bumble_device.Connection:
@@ -160,10 +149,9 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
         await self._pair_and_connect_with_hfp_server_on_ref()
 
       # Step 2: Terminate ACL connection
-      async with self.assert_not_timeout(
-          _DEFAULT_STEP_TIMEOUT_SECONDS, msg="[DUT] Terminate connection."
-      ):
-        await self._terminate_connection_from_dut()
+      await self.disconnect_with_check(
+          self.ref.address, android_constants.Transport.CLASSIC
+      )
 
       # Step 3: Setup ACL connection from REF
       async with self.assert_not_timeout(

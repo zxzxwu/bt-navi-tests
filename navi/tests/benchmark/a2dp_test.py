@@ -54,31 +54,6 @@ class _A2dpStreamState(enum.Enum):
   STOP = enum.auto()
 
 
-class LocalSinkWrapper:
-  """Wrapper for LocalSink to provide start/suspend events."""
-
-  def __init__(self, impl: avdtp.LocalSink):
-    self.impl = impl
-    self.condition = asyncio.Condition()
-    for command in (
-        impl.EVENT_CONFIGURATION,
-        impl.EVENT_OPEN,
-        impl.EVENT_START,
-        impl.EVENT_SUSPEND,
-        impl.EVENT_CLOSE,
-        impl.EVENT_ABORT,
-    ):
-      self.impl.on(command, self._on_command)
-
-  async def _on_command(self) -> None:
-    async with self.condition:
-      self.condition.notify_all()
-
-  @property
-  def stream_state(self) -> int | None:
-    return self.impl.stream.state if self.impl.stream else None
-
-
 class AvrcpDelegate(avrcp.Delegate):
 
   def __init__(self, supported_events: Iterable[avrcp.EventId] = ()):
@@ -320,7 +295,7 @@ class A2dpTest(test_base.PerformanceTestBase):
     )
 
   async def wait_for_a2dp_status(
-      self, ref_sink: LocalSinkWrapper, status: _A2dpStreamState
+      self, ref_sink: a2dp_ext.LocalSinkWrapper, status: _A2dpStreamState
   ) -> None:
     with self.dut.bl4a.register_callback(bl4a_api.Module.A2DP) as dut_cb:
       if status == _A2dpStreamState.STOP:
@@ -377,7 +352,7 @@ class A2dpTest(test_base.PerformanceTestBase):
     )
     if not ref_sinks:
       self.fail("No sink found for codec %s." % codec.name)
-    ref_sink = LocalSinkWrapper(ref_sinks[0])
+    ref_sink = a2dp_ext.LocalSinkWrapper(ref_sinks[0])
 
     # If there is a playback, wait until it ends.
     await self.wait_for_a2dp_status(ref_sink, _A2dpStreamState.STOP)

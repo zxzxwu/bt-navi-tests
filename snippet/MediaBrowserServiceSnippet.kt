@@ -20,7 +20,6 @@ import android.app.Activity
 import android.content.Intent
 import android.util.Log
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
@@ -34,13 +33,11 @@ import com.google.android.mobly.snippet.rpc.RunOnUiThread
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
-import com.google.wireless.android.pixel.bluetooth.snippet.Utils.toList
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import org.json.JSONObject
 
 /** Snippet for MediaBrowserService. */
 class MediaBrowserServiceSnippet : Snippet {
@@ -48,9 +45,7 @@ class MediaBrowserServiceSnippet : Snippet {
   private val context = instrumentation.targetContext
   internal var mediaLibrarySession: MediaLibraryService.MediaLibrarySession? = null
 
-  data class MediaNode(val item: MediaItem, val children: List<MediaNode>)
-
-  private val mediaTreeNodes = mutableMapOf<String, MediaNode>()
+  private val mediaTreeNodes = mutableMapOf<String, Utils.MediaNode>()
 
   /**
    * Android Bluetooth identify media player apps by querying for activies receiving
@@ -90,32 +85,15 @@ class MediaBrowserServiceSnippet : Snippet {
     }
   }
 
-  internal fun parseTree(json: JSONObject): MediaNode {
-    val id = json.getString(SnippetConstants.FIELD_ID)
-    val title = json.optString(SnippetConstants.FIELD_TITLE, "")
-    val isBrowsable = json.optBoolean(SnippetConstants.FIELD_BROWSABLE, false)
-    val isPlayable = json.optBoolean(SnippetConstants.FIELD_PLAYABLE, false)
-
-    val mediaMetadata =
-      MediaMetadata.Builder()
-        .setTitle(title)
-        .setIsBrowsable(isBrowsable)
-        .setIsPlayable(isPlayable)
-        .build()
-
-    val item = MediaItem.Builder().setMediaId(id).setMediaMetadata(mediaMetadata).build()
-    val children =
-      json.optJSONArray(SnippetConstants.FIELD_CHILDREN)?.toList<JSONObject>()?.map {
-        parseTree(it)
-      } ?: listOf()
-
-    val node = MediaNode(item, children)
-    mediaTreeNodes[id] = node
-    return node
+  private fun cacheMediaTreeNodes(mediaTreeRoot: Utils.MediaNode) {
+    mediaTreeNodes[mediaTreeRoot.item.mediaId] = mediaTreeRoot
+    for (child in mediaTreeRoot.children) {
+      cacheMediaTreeNodes(child)
+    }
   }
 
   @AsyncRpc(description = "Register media library session")
-  fun registerMediaLibrarySession(callbackId: String, mediaTree: JSONObject) {
+  fun registerMediaLibrarySession(callbackId: String, mediaTreeRoot: Utils.MediaNode) {
     context.startService(Intent(context, MediaLibraryServiceImpl::class.java))
     // Wait for MediaLibraryServiceImpl to be initiated.
     val mediaLibraryService =
@@ -124,8 +102,7 @@ class MediaBrowserServiceSnippet : Snippet {
       } ?: throw IllegalStateException("MediaLibraryServiceImpl is not initiated")
 
     mediaTreeNodes.clear()
-
-    val root = parseTree(mediaTree)
+    cacheMediaTreeNodes(mediaTreeRoot)
 
     mediaLibrarySession =
       MediaLibraryService.MediaLibrarySession.Builder(
@@ -138,7 +115,7 @@ class MediaBrowserServiceSnippet : Snippet {
               params: MediaLibraryService.LibraryParams?,
             ): ListenableFuture<LibraryResult<MediaItem>> {
               Log.d(TAG, "onGetLibraryRoot")
-              return Futures.immediateFuture(LibraryResult.ofItem(root.item, null))
+              return Futures.immediateFuture(LibraryResult.ofItem(mediaTreeRoot.item, null))
             }
 
             override fun onGetChildren(

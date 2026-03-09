@@ -13,7 +13,6 @@
 #  limitations under the License.
 
 import asyncio
-import dataclasses
 import datetime
 import decimal
 import functools
@@ -23,6 +22,7 @@ from typing import TypeVar, cast
 from unittest import mock
 
 from bumble import core
+from bumble import data_types
 from bumble import device
 from bumble import gatt
 from bumble import gatt_client
@@ -63,6 +63,9 @@ _PREPARE_TIME_SECONDS = 0.5
 _STREAMING_TIME_SECONDS = 1.0
 _CALLER_NAME = "Pixel Bluetooth"
 _CALLER_NUMBER = "123456789"
+_GENERAL_DISCOVERABLE_AD_FLAGS = data_types.Flags(
+    core.AdvertisingData.Flags.LE_GENERAL_DISCOVERABLE_MODE
+)
 
 _ConnectionState = android_constants.ConnectionState
 _Direction = constants.Direction
@@ -71,25 +74,6 @@ _StreamType = android_constants.StreamType
 _CallState = android_constants.CallState
 _McpOpcode = mcp.MediaControlPointOpcode
 _AndroidProperty = android_constants.Property
-
-
-@dataclasses.dataclass
-class _CapAnnouncement:
-  """See Common Audio Profile, 8.1.1. CAP Announcement."""
-
-  announcement_type: bap.AnnouncementType
-
-  def __bytes__(self) -> bytes:
-    return bytes(
-        core.AdvertisingData([(
-            core.AdvertisingData.SERVICE_DATA_16_BIT_UUID,
-            struct.pack(
-                "<2sB",
-                bytes(gatt.GATT_COMMON_AUDIO_SERVICE),
-                self.announcement_type,
-            ),
-        )])
-    )
 
 
 _SERVICE = TypeVar("_SERVICE", bound=gatt.Service)
@@ -372,17 +356,8 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
   @override
   async def async_setup_class(self) -> None:
     await super().async_setup_class()
-    if self.dut.getprop(_AndroidProperty.BAP_UNICAST_CLIENT_ENABLED) != "true":
-      raise signals.TestAbortClass("Unicast client is not enabled")
-
-    if (
-        self.dut.bt.getSdkVersion() >= 35
-        and android_constants.AudioDeviceType.BLE_HEADSET
-        not in self.dut.bt.getSupportedAudioDeviceTypes(
-            android_constants.AudioDeviceRole.OUTPUT
-        )
-    ):
-      raise signals.TestAbortClass("Device does not support LE Audio.")
+    if not self.dut.is_le_audio_supported:
+      raise signals.TestAbortClass("[DUT] Device does not support LE Audio.")
 
     self.dut_vcp_enabled = (
         self.dut.getprop(_AndroidProperty.VCP_CONTROLLER_ENABLED) == "true"
@@ -490,8 +465,9 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
     with self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER) as dut_cb:
       for ref in self.refs:
         if is_active:
-          self.logger.info("[DUT] Disconnect REF")
-          self.dut.bt.disconnect(ref.random_address)
+          await self.disconnect_with_check(
+              ref.random_address, android_constants.Transport.LE, ref
+          )
         else:
           if not (
               ref_dut_acl := ref.device.find_connection_by_bd_addr(
@@ -519,16 +495,21 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
             if is_active
             else bap.AnnouncementType.TARGETED
         )
-        bap_announcement = bap.UnicastServerAdvertisingData(
+        bap_announcement = ascs.make_bap_announcement(
             announcement_type=(announcement_type),
             available_audio_contexts=bap.ContextType(0xFFFF),
         )
-        cap_announcement = _CapAnnouncement(announcement_type=announcement_type)
+        cap_announcement = ascs.make_cap_announcement(announcement_type)
         async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
           await ref.device.create_advertising_set(
               advertising_parameters=_DEFAUILT_ADVERTISING_PARAMETERS,
-              advertising_data=bytes(bap_announcement)
-              + bytes(cap_announcement),
+              advertising_data=bytes(
+                  core.AdvertisingData([
+                      _GENERAL_DISCOVERABLE_AD_FLAGS,
+                      bap_announcement,
+                      cap_announcement,
+                  ])
+              ),
           )
         if is_active:
           self.logger.info("[DUT] Reconnect REF")
@@ -824,9 +805,12 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
         await ref.device.create_advertising_set(
             advertising_parameters=_DEFAUILT_ADVERTISING_PARAMETERS,
             advertising_data=bytes(
-                _CapAnnouncement(
-                    announcement_type=bap.AnnouncementType.TARGETED
-                )
+                core.AdvertisingData([
+                    ascs.make_bap_announcement(
+                        announcement_type=bap.AnnouncementType.TARGETED
+                    ),
+                    _GENERAL_DISCOVERABLE_AD_FLAGS,
+                ])
             ),
         )
         self.logger.info("[REF] Wait for ASE to be streaming")
@@ -991,6 +975,12 @@ class LeAudioUnicastClientDualDeviceTest(navi_test_base.MultiDevicesTestBase):
     await dut_player_cb.wait_for_event(
         bl4a_api.PlayerIsPlayingChanged(is_playing=True)
     )
+
+    for i, media_state in enumerate(media_states):
+      self.logger.info(
+          "[REF-%d] Wait for media state to be PLAYING", i
+      )
+      await media_state.wait_for_target_value(bytes([mcp.MediaState.PLAYING]))
 
     async with self.assert_not_timeout(
         _DEFAULT_STEP_TIMEOUT_SECONDS, msg="[REF] Pause"
