@@ -630,7 +630,11 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
     self.dut.bt.startInquiry()
 
     await dut_cb.wait_for_event(
-        bl4a_api.DeviceFound(address=self.ref.address, name=mock.ANY),
+        bl4a_api.DeviceFound(
+            address=self.ref.address,
+            name=mock.ANY,
+            rssi=mock.ANY
+        ),
     )
 
     self.logger.info("[DUT] Create bond.")

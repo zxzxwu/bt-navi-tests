@@ -19,8 +19,8 @@ from typing import Literal, overload
 @overload
 def GetResource(name: str, mode: Literal["r"]) -> str: ...
 @overload
-def GetResource(name: str, mode: Literal["rb"]) -> bytes: ...
-def GetResource(name: str, mode: Literal["r", "rb"]) -> str | bytes:
+def GetResource(name: str, mode: Literal["rb"] = "rb") -> bytes: ...
+def GetResource(name: str, mode: Literal["r", "rb"] = "rb") -> str | bytes:
     """Get the resource file content."""
     package, filename = name.rsplit("/", 1)
     package = package.replace("/", ".")

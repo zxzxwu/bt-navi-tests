@@ -16,9 +16,12 @@
 
 import asyncio
 import collections
+from collections.abc import Iterator, Sequence
 import enum
+import io
 import itertools
 import re
+import wave
 
 from bumble import core
 from bumble import device
@@ -30,12 +33,14 @@ from mobly import signals
 from mobly.controllers import android_device
 from typing_extensions import override
 
+from navi.utils import resources
 from navi.bumble_ext import hfp as hfp_ext
 from navi.tests import navi_test_base
 from navi.utils import android_constants
 from navi.utils import audio
 from navi.utils import bl4a_api
 from navi.utils import constants
+from navi.utils import lc3
 
 _DEFAULT_STEP_TIMEOUT_SECONDS = 15.0
 _HFP_SDP_HANDLE = 1
@@ -48,6 +53,8 @@ _RECORDING_PATH = "/storage/self/primary/Recordings/record.wav"
 _HFP_FRAME_DURATION = 0.0075  # 7.5ms
 _MAX_FRAME_SIZE = 240
 _ACTION_VOICE_COMMAND = "android.intent.action.VOICE_COMMAND"
+_MSBC_AUDIO_FILE = "navi/tests/data/sine1000hz_16khz_1s.sbc"
+_LC3_AUDIO_FILE = "navi/tests/data/sine1000hz_32khz_1s.lc3"
 
 _AudioCodec = hfp.AudioCodec
 _AgIndicator = hfp.AgIndicator
@@ -70,15 +77,27 @@ class _CallAgIndicator(enum.IntEnum):
   ACTIVE = 1
 
 
+def _pcm_to_wave(pcm_data: bytes, frame_rate: int) -> bytes:
+  """Converts PCM data to wave data."""
+  buffer = io.BytesIO()
+  with wave.open(buffer, "wb") as wave_file:
+    wave_file.setnchannels(1)
+    wave_file.setsampwidth(2)
+    wave_file.setframerate(frame_rate)
+    wave_file.writeframes(pcm_data)
+  return buffer.getvalue()
+
+
 class HfpAgTest(navi_test_base.TwoDevicesTestBase):
 
   @override
   async def async_setup_class(self) -> None:
     await super().async_setup_class()
+
     if self.dut.getprop(android_constants.Property.HFP_AG_ENABLED) != "true":
       raise signals.TestAbortClass("HFP(AG) is not enabled on DUT.")
 
-    # Disable all other voice command apps to prevent choosing activities.
+    self.logger.info("[DUT] Disable all other voice command apps.")
     voice_command_packages: set[str] = set(
         re.findall(
             r"packageName=(.+)",
@@ -98,112 +117,95 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
     for package in voice_command_packages:
       if package == android_constants.PACKAGE_NAME_BLUETOOTH_SNIPPET:
         continue
+
       self.logger.info("[DUT] Disable voice command app: %s.", package)
       self.dut.shell(["pm", "disable", package])
+
       self.test_class_context.callback(callback, package)
 
   @override
   async def async_teardown_test(self) -> None:
+    self.logger.info("[DUT] Stop audio.")
     self.dut.bt.audioStop()
-    # Make sure Bumble is off to cancel any running tasks.
-    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
-      await self.ref.close()
+
     await super().async_teardown_test()
 
   def _is_ranchu_emulator(self, dev: android_device.AndroidDevice) -> bool:
     return (build_info := dev.build_info) and build_info["hardware"] == "ranchu"
 
-  async def _wait_for_sco_state(
-      self,
-      dut_hfp_ag_callback: _CallbackHandler,
-      state: _ScoState,
-  ) -> None:
-    await dut_hfp_ag_callback.wait_for_event(
-        event=_HfpAgAudioStateChange(address=self.ref.address, state=state),
-    )
-
   async def _wait_for_call_state(
       self,
       dut_telecom_callback: _CallbackHandler,
-      *states,
+      *states: _CallState,
   ) -> None:
+    self.logger.info(
+        "[DUT] Wait for call state in %s.",
+        ", ".join(state.name for state in states),
+    )
     await dut_telecom_callback.wait_for_event(
         event=bl4a_api.CallStateChanged,
         predicate=lambda e: (e.state in states),
     )
 
-  async def _terminate_connection_from_dut(self) -> None:
-    with (self.dut.bl4a.register_callback(_Module.ADAPTER) as dut_cb,):
-      self.logger.info("[DUT] Terminate connection.")
-      self.dut.bt.disconnect(self.ref.address)
-      await dut_cb.wait_for_event(
-          bl4a_api.AclDisconnected(
-              address=self.ref.address,
-              transport=android_constants.Transport.CLASSIC,
-          ),
-      )
-
   async def test_pair_and_connect(self) -> None:
-    """Tests HFP connection establishment right after a pairing session.
+    """Tests HFP connection after pairing.
 
     Test steps:
       1. Setup HFP on REF.
       2. Create bond from DUT.
-      3. Wait HFP connected on DUT.(Android should autoconnect HFP as AG)
+      3. Wait for HFP connected on DUT.
     """
-    with (self.dut.bl4a.register_callback(_Module.HFP_AG) as dut_cb,):
-      hfp_ext.HfProtocol.setup_server(
-          self.ref.device,
-          sdp_handle=_HFP_SDP_HANDLE,
-          configuration=hfp_ext.make_hf_configuration(),
-      )
+    self.logger.info("[REF] Setup HFP server.")
+    hfp_ext.HfProtocol.setup_server(
+        self.ref.device,
+        sdp_handle=_HFP_SDP_HANDLE,
+        configuration=hfp_ext.make_hf_configuration(),
+    )
 
-      self.logger.info("[DUT] Connect and pair REF.")
+    with self.dut.bl4a.register_callback(_Module.HFP_AG) as ag_cb:
       await self.classic_connect_and_pair(connect_profiles=True)
 
       self.logger.info("[DUT] Wait for HFP connected.")
-      await dut_cb.wait_for_event(
+      await ag_cb.wait_for_event(
           bl4a_api.ProfileActiveDeviceChanged(address=self.ref.address),
-          timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
       )
 
   async def test_paired_connect_outgoing(self) -> None:
-    """Tests HFP connection establishment where pairing is not involved.
+    """Tests HFP reconnection from DUT.
 
     Test steps:
       1. Setup pairing between DUT and REF.
       2. Terminate ACL connection.
       3. Trigger connection from DUT.
-      4. Wait HFP connected on DUT.
+      4. Wait for HFP connected on DUT.
       5. Disconnect from DUT.
-      6. Wait HFP disconnected on DUT.
+      6. Wait for HFP disconnected on DUT.
     """
-    with (self.dut.bl4a.register_callback(_Module.HFP_AG) as dut_cb,):
+    with self.dut.bl4a.register_callback(_Module.HFP_AG) as ag_cb:
       await self.test_pair_and_connect()
-      ref_address = self.ref.address
 
-      await self._terminate_connection_from_dut()
+      await self.disconnect_with_check(
+          self.ref.address, android_constants.Transport.CLASSIC
+      )
 
       self.logger.info("[DUT] Reconnect.")
-      self.dut.bt.connect(ref_address)
+      self.dut.bt.connect(self.ref.address)
 
       self.logger.info("[DUT] Wait for HFP connected.")
-      await dut_cb.wait_for_event(
+      await ag_cb.wait_for_event(
           bl4a_api.ProfileActiveDeviceChanged(address=self.ref.address),
-          timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
       )
 
       self.logger.info("[DUT] Disconnect.")
-      self.dut.bt.disconnect(ref_address)
+      self.dut.bt.disconnect(self.ref.address)
 
       self.logger.info("[DUT] Wait for HFP disconnected.")
-      await dut_cb.wait_for_event(
+      await ag_cb.wait_for_event(
           bl4a_api.ProfileActiveDeviceChanged(address=None),
-          timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
       )
 
   async def test_paired_connect_incoming(self) -> None:
-    """Tests HFP connection establishment where pairing is not involved.
+    """Tests HFP reconnection from REF.
 
     Test steps:
       1. Setup pairing between DUT and REF.
@@ -215,9 +217,12 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
     """
     dut_cb = self.dut.bl4a.register_callback(_Module.HFP_AG)
     self.test_case_context.push(dut_cb)
+
     await self.test_pair_and_connect()
 
-    await self._terminate_connection_from_dut()
+    await self.disconnect_with_check(
+        self.ref.address, android_constants.Transport.CLASSIC
+    )
 
     self.logger.info("[REF] Reconnect.")
     dut_ref_acl = await self.ref.device.connect(
@@ -226,16 +231,17 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
         timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
     )
 
-    self.logger.info("[REF] Authenticate and encrypt connection.")
+    self.logger.info("[REF] Authenticate connection.")
     await dut_ref_acl.authenticate()
+
+    self.logger.info("[REF] Encrypt connection.")
     await dut_ref_acl.encrypt()
 
-    rfcomm_channel = await rfcomm.find_rfcomm_channel_with_uuid(
-        dut_ref_acl, core.BT_HANDSFREE_AUDIO_GATEWAY_SERVICE
-    )
-    if rfcomm_channel is None:
-      self.fail("No HFP RFCOMM channel found on REF.")
-    self.logger.info("[REF] Found HFP RFCOMM channel %s.", rfcomm_channel)
+    self.logger.info("[REF] Discover SDP records.")
+    sdp_records = await hfp_ext.AudioGatewaySdpRecord.find(dut_ref_acl)
+    self.logger.info("[REF] Found SDP records: %s.", sdp_records)
+    self.assertLen(sdp_records, 1)
+    rfcomm_channel = sdp_records[0].rfcomm_channel
 
     self.logger.info("[REF] Open RFCOMM Multiplexer.")
     async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
@@ -253,7 +259,6 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
     self.logger.info("[DUT] Wait for HFP connected.")
     await dut_cb.wait_for_event(
         bl4a_api.ProfileActiveDeviceChanged(address=self.ref.address),
-        timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
     )
 
     self.logger.info("[REF] Disconnect.")
@@ -262,8 +267,54 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
     self.logger.info("[DUT] Wait for HFP disconnected.")
     await dut_cb.wait_for_event(
         bl4a_api.ProfileActiveDeviceChanged(address=None),
-        timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
     )
+
+  async def test_sdp_discovery(self) -> None:
+    """Tests SDP discovery from REF.
+
+    Test steps:
+      1. Setup pairing between DUT and REF.
+      2. Discover SDP records from REF.
+      3. Verify SDP records.
+    """
+    ref_acl_connection = await self.classic_connect_and_pair(
+        connect_profiles=False
+    )
+
+    self.logger.info("[REF] Discover SDP records.")
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      records = await hfp_ext.AudioGatewaySdpRecord.find(ref_acl_connection)
+      if not records:
+        self.fail("No SDP record found.")
+      self.logger.info("[REF] Found SDP records: %s.", records)
+
+    self.assertLen(records, 1)
+    record = records[0]
+    self.assertGreaterEqual(record.version, hfp.ProfileVersion.V1_6)
+    self.assertContainsSubset(
+        [
+            hfp.AgSdpFeature.THREE_WAY_CALLING,
+            hfp.AgSdpFeature.EC_NR,
+            hfp.AgSdpFeature.VOICE_RECOGNITION_FUNCTION,
+            hfp.AgSdpFeature.IN_BAND_RING_TONE_CAPABILITY,
+            hfp.AgSdpFeature.WIDE_BAND_SPEECH,
+        ],
+        record.supported_features,
+    )
+    if (
+        self.dut.getprop(_PROPERTY_SWB_SUPPORTED) == "true"
+        or self.dut.getprop(android_constants.Property.SW_PATH_ENABLED)
+        == "true"
+    ):
+      self.assertIn(
+          hfp.AgSdpFeature.SUPER_WIDE_BAND_SPEED_SPEECH,
+          record.supported_features,
+      )
+    else:
+      self.assertNotIn(
+          hfp.AgSdpFeature.SUPER_WIDE_BAND_SPEED_SPEECH,
+          record.supported_features,
+      )
 
   async def test_reconnect_bt_on_off(self) -> None:
     """Tests HFP connection after BT on/off.
@@ -303,43 +354,34 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
           bl4a_api.ProfileActiveDeviceChanged(address=self.ref.address)
       )
 
-  @navi_test_base.named_parameterized(
-      cvsd_only=dict(
-          supported_audio_codecs=[
-              _AudioCodec.CVSD,
-          ]
-      ),
-      cvsd_msbc=dict(
-          supported_audio_codecs=[
-              _AudioCodec.CVSD,
-              _AudioCodec.MSBC,
-          ]
-      ),
-      cvsd_msbc_lc3_swb=dict(
-          supported_audio_codecs=[
-              _AudioCodec.CVSD,
-              _AudioCodec.MSBC,
-              _AudioCodec.LC3_SWB,
-          ]
-      ),
-  )
-  async def test_call_sco_connection_with_codec_negotiation(
+  async def _test_streaming_with_codec_negotiation(
       self,
+      preferred_codec: hfp.AudioCodec,
       supported_audio_codecs: list[hfp.AudioCodec],
-  ) -> None:
-    """Tests making an outgoing phone call, observing SCO connection status.
+      ref_tx_data_iterator: Iterator[Sequence[int]],
+  ) -> tuple[bytes, list[hci.HCI_SynchronousDataPacket]]:
+    """Tests SCO streaming with codec negotiation.
 
     Test steps:
-      1. Setup HFP connection.
-      2. Place an outgoing call.
-      3. Verify SCO connected.
-      4. Terminate the call.
-      5. Verify SCO disconnected.
+      1. Connect and pair REF.
+      2. Wait for HFP connected.
+      3. [DUT] Add call.
+      4. [DUT] Start streaming.
+      5. Wait for SCO connected.
+      6. [DUT] Start recording.
+      7. Streaming for 5 seconds.
+      8. [DUT] Terminate call.
+      9. Wait for SCO disconnected.
+      10. [DUT] Stop recording.
 
     Args:
-      supported_audio_codecs: Audio codecs supported by REF device.
-    """
+      preferred_codec: The preferred codec.
+      supported_audio_codecs: The supported audio codecs.
+      ref_tx_data_iterator: The iterator for REF to send SCO data.
 
+    Returns:
+      A tuple of (DUT RX received buffer, REF RX received packets).
+    """
     # [REF] Setup HFP.
     hfp_configuration = hfp_ext.make_hf_configuration(
         supported_hf_features=[hfp.HfFeature.CODEC_NEGOTIATION],
@@ -352,40 +394,20 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
         configuration=hfp_configuration,
     )
 
-    if (
-        _AudioCodec.LC3_SWB in supported_audio_codecs
-        and self.dut.getprop(_PROPERTY_SWB_SUPPORTED) == "true"
-    ):
-      preferred_codec = _AudioCodec.LC3_SWB
-      # Sample rate is defined in HFP 1.9 spec.
-      sample_rate = 32000
-    elif _AudioCodec.MSBC in supported_audio_codecs:
-      preferred_codec = _AudioCodec.MSBC
-      sample_rate = 16000
-    else:
-      preferred_codec = _AudioCodec.CVSD
-      sample_rate = 8000
-    # PCM frame size = sample_rate * frame_duration (7.5ms) * sample_width (2)
-    pcm_frame_size = int(sample_rate * _HFP_FRAME_DURATION * 2)
+    ag_cb = self.dut.bl4a.register_callback(_Module.HFP_AG)
+    telecom_cb = self.dut.bl4a.register_callback(_Module.TELECOM)
+    self.test_case_context.push(ag_cb)
+    self.test_case_context.push(telecom_cb)
 
-    dut_hfp_cb = self.dut.bl4a.register_callback(_Module.HFP_AG)
-    dut_telecom_cb = self.dut.bl4a.register_callback(_Module.TELECOM)
-    self.test_case_context.push(dut_hfp_cb)
-    self.test_case_context.push(dut_telecom_cb)
-
-    self.logger.info("[DUT] Connect and pair REF.")
     await self.classic_connect_and_pair(connect_profiles=True)
 
     self.logger.info("[DUT] Wait for HFP connected.")
-    await dut_hfp_cb.wait_for_event(
+    await ag_cb.wait_for_event(
         bl4a_api.ProfileActiveDeviceChanged(address=self.ref.address),
-        timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
     )
 
-    async with self.assert_not_timeout(
-        _DEFAULT_STEP_TIMEOUT_SECONDS,
-        msg="[REF] Wait for HFP connected.",
-    ):
+    self.logger.info("[REF] Wait for HFP connected.")
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
       ref_hfp_protocol = await ref_hfp_protocol_queue.get()
 
     sco_links = asyncio.Queue[device.ScoLink]()
@@ -400,85 +422,70 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
         constants.Direction.OUTGOING,
     ) as call:
       await self._wait_for_call_state(
-          dut_telecom_cb, _CallState.CONNECTING, _CallState.DIALING
+          telecom_cb, _CallState.CONNECTING, _CallState.DIALING
       )
 
-      self.logger.info("[DUT] Start streaming.")
+      self.logger.info("[DUT] Set audio repeat mode to one.")
       self.dut.bt.audioSetRepeat(android_constants.RepeatMode.ONE)
-      await asyncio.to_thread(self.dut.bt.audioPlaySine)
+
+      self.logger.info("[DUT] Start streaming.")
+      self.dut.bt.audioPlaySine()
 
       self.logger.info("[DUT] Wait for SCO connected.")
-      await self._wait_for_sco_state(dut_hfp_cb, _ScoState.CONNECTED)
+      await ag_cb.wait_for_event(
+          _HfpAgAudioStateChange(
+              address=self.ref.address, state=_ScoState.CONNECTED
+          )
+      )
 
+      self.logger.info("[REF] Wait for SCO connected.")
       async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
-        self.logger.info("[REF] Wait for SCO connected.")
         sco_link = await sco_links.get()
 
-        self.assertEqual(ref_hfp_protocol.active_codec, preferred_codec)
+      self.assertEqual(ref_hfp_protocol.active_codec, preferred_codec)
 
       self.logger.info("[DUT] Start recording.")
       recorder = await asyncio.to_thread(
           lambda: self.dut.bl4a.start_audio_recording(_RECORDING_PATH)
       )
-      # Make sure the recorder is closed after the test.
       self.test_case_context.push(recorder)
 
-      esco_parameters = await ref_hfp_protocol.get_esco_parameters()
-      check_audio_correctness = (
-          # We don't support transparent audio packets for now.
-          esco_parameters.input_coding_format.codec_id == hci.CodecID.LINEAR_PCM
-          # Skip audio correctness check on emulators.
-          and not self.dut.device.is_emulator
-          and audio.SUPPORT_AUDIO_PROCESSING
-      )
-      ref_sink_buffer = bytearray()
-      if check_audio_correctness:
-        sine_tone_batch_iterator = itertools.cycle(
-            audio.batched(
-                audio.generate_sine_tone(
-                    frequency=1000,
-                    duration=1.0,
-                    sample_rate=sample_rate,
-                    data_type="int16",
-                ),
-                n=pcm_frame_size,
-            )
+      ref_received_packets = list[hci.HCI_SynchronousDataPacket]()
+
+      def ref_send_sco_data() -> None:
+        if sco_link not in self.ref.device.sco_links.values():
+          return
+        ref_tx_data = next(ref_tx_data_iterator)
+        self.ref.device.host.send_sco_sdu(sco_link.handle, bytes(ref_tx_data))
+        # Sleep for 90% of the frame duration, or packets might be dropped.
+        asyncio.get_running_loop().call_later(
+            _HFP_FRAME_DURATION * 0.9, ref_send_sco_data
         )
 
-        async def source_streamer() -> None:
-          while sco_link.handle in self.ref.device.sco_links:
-            tx_data = next(sine_tone_batch_iterator)
-            for offset in range(0, len(tx_data), _MAX_FRAME_SIZE):
-              buffer = tx_data[offset : offset + _MAX_FRAME_SIZE]
-              self.ref.device.host.send_hci_packet(
-                  hci.HCI_SynchronousDataPacket(
-                      connection_handle=sco_link.handle,
-                      packet_status=0,
-                      data_total_length=len(buffer),
-                      data=bytes(buffer),
-                  )
-              )
-            # Sleep for 90% of the frame duration, or packets might be dropped.
-            await asyncio.sleep(_HFP_FRAME_DURATION * 0.9)
+      sco_link.sink = ref_received_packets.append
+      ref_send_sco_data()
 
-        def on_sco_packet(packet: hci.HCI_SynchronousDataPacket) -> None:
-          ref_sink_buffer.extend(packet.data)
-
-        sco_link.sink = on_sco_packet
-        sco_link.abort_on(sco_link.EVENT_DISCONNECTION, source_streamer())
-
-      # Streaming for 5 seconds.
+      self.logger.info("[DUT] Stream for 5 seconds.")
       await asyncio.sleep(5.0)
 
       self.logger.info("[DUT] Terminate call.")
       call.close()
-      await self._wait_for_call_state(dut_telecom_cb, _CallState.DISCONNECTED)
+
+      await self._wait_for_call_state(telecom_cb, _CallState.DISCONNECTED)
 
     self.logger.info("[DUT] Wait for SCO disconnected.")
-    await self._wait_for_sco_state(dut_hfp_cb, _ScoState.DISCONNECTED)
+    await ag_cb.wait_for_event(
+        _HfpAgAudioStateChange(
+            address=self.ref.address,
+            state=_ScoState.DISCONNECTED,
+        )
+    )
 
     self.logger.info("[DUT] Stop recording.")
     await asyncio.to_thread(recorder.close)
+
+    self.logger.info("[DUT] Stop streaming.")
+    await asyncio.to_thread(self.dut.bt.audioStop)
 
     # Get recording from DUT.
     rx_received_buffer = self.dut.adb.shell([
@@ -486,30 +493,206 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
         f"/data/media/{self.dut.adb.current_user_id}/Recordings/record.wav",
     ])
 
-    if (
-        self.user_params.get(navi_test_base.RECORD_FULL_DATA)
-        and rx_received_buffer
-    ):
-      self.write_test_output_data(
-          f"hfp_ag_data.{preferred_codec.name.lower()}",
-          rx_received_buffer,
-      )
+    return rx_received_buffer, ref_received_packets
 
-    if check_audio_correctness:
+  async def test_streaming_with_codec_negotiation_cvsd(self) -> None:
+    """Test SCO streaming with codec negotiation using CVSD.
+
+    Test steps:
+      1. Setup HFP connection.
+      2. [DUT] Add call.
+      3. Verify SCO connection and codec.
+      4. Streaming for 5 second.
+      5. Terminate call.
+      6. Verify SCO disconnection.
+      7. Verify dominant frequency of streaming data.
+    """
+    dut_rx_received_buffer, ref_received_packets = (
+        await self._test_streaming_with_codec_negotiation(
+            preferred_codec=hfp.AudioCodec.CVSD,
+            supported_audio_codecs=[hfp.AudioCodec.CVSD],
+            ref_tx_data_iterator=itertools.cycle(
+                audio.batched(
+                    audio.generate_sine_tone(
+                        frequency=1000,
+                        duration=1.5,
+                        sample_rate=8000,
+                        data_type="int16",
+                    ),
+                    n=120,
+                )
+            ),
+        )
+    )
+
+    ref_rx_received_buffer = _pcm_to_wave(
+        b"".join([packet.data for packet in ref_received_packets]),
+        frame_rate=8000,
+    )
+    self.write_test_output_data("tx.wav", ref_rx_received_buffer)
+    self.write_test_output_data("rx.wav", dut_rx_received_buffer)
+
+    if self.dut.device.is_emulator:
+      self.logger.info("Skip codec check for emulator.")
+      return
+
+    tx_dominant_frequency = audio.get_dominant_frequency(
+        ref_rx_received_buffer, format="wav"
+    )
+    self.logger.info("[Tx] Dominant frequency: %.2f", tx_dominant_frequency)
+    rx_dominant_frequency = audio.get_dominant_frequency(
+        dut_rx_received_buffer, format="wav"
+    )
+    self.logger.info("[Rx] Dominant frequency: %.2f", rx_dominant_frequency)
+    self.assertAlmostEqual(tx_dominant_frequency, 1000, delta=10)
+    self.assertAlmostEqual(rx_dominant_frequency, 1000, delta=10)
+
+  async def test_streaming_with_codec_negotiation_msbc(self) -> None:
+    """Test SCO streaming with codec negotiation using mSBC.
+
+    Test steps:
+      1. Setup HFP connection.
+      2. [DUT] Add call.
+      3. Verify SCO connection and codec.
+      4. Streaming for 5 second.
+      5. Terminate call.
+      6. Verify SCO disconnection.
+      7. Verify dominant frequency of streaming data.
+    """
+    frame_size = 57
+    ref_tx_data_iterator = (
+        header + bytes(payload) + b"\0"  # Padding.
+        for header, payload in zip(
+            itertools.cycle(hfp_ext.SCO_H2_HEADER),
+            itertools.cycle(
+                audio.batched(
+                    resources.GetResource(_MSBC_AUDIO_FILE), frame_size
+                )
+            ),
+        )
+    )
+    dut_rx_received_buffer, ref_rx_received_packets = (
+        await self._test_streaming_with_codec_negotiation(
+            preferred_codec=hfp.AudioCodec.MSBC,
+            supported_audio_codecs=[hfp.AudioCodec.CVSD, hfp.AudioCodec.MSBC],
+            ref_tx_data_iterator=ref_tx_data_iterator,
+        )
+    )
+
+    ref_rx_received_buffer = b"".join([
+        # Drop header and padding.
+        packet.data[hfp_ext.SCO_H2_HEADER_SIZE : -1]
+        for packet in ref_rx_received_packets
+        # Filter out invalid packets, or libsbc cannot decode them.
+        if (
+            packet.packet_status == 0
+            and (
+                len(packet.data)
+                == hfp_ext.ESCO_PARAMETERS_T2_TRANSPARENT.transmit_codec_frame_size
+            )
+            and (
+                packet.data[: hfp_ext.SCO_H2_HEADER_SIZE]
+                in hfp_ext.SCO_H2_HEADER
+            )
+        )
+    ])
+    self.write_test_output_data("tx.sbc", ref_rx_received_buffer)
+    self.write_test_output_data("rx.wav", dut_rx_received_buffer)
+
+    if self.dut.device.is_emulator:
+      self.logger.info("Skip codec check for emulator.")
+      return
+
+    tx_dominant_frequency = audio.get_dominant_frequency(
+        ref_rx_received_buffer, format="sbc"
+    )
+    self.logger.info("[Tx] Dominant frequency: %.2f", tx_dominant_frequency)
+    rx_dominant_frequency = audio.get_dominant_frequency(
+        dut_rx_received_buffer, format="wav"
+    )
+    self.logger.info("[Rx] Dominant frequency: %.2f", rx_dominant_frequency)
+    self.assertAlmostEqual(tx_dominant_frequency, 1000, delta=10)
+    self.assertAlmostEqual(rx_dominant_frequency, 1000, delta=10)
+
+  async def test_streaming_with_codec_negotiation_lc3(self) -> None:
+    """Test SCO streaming with codec negotiation using LC3 SWB.
+
+    Test steps:
+      1. Setup HFP connection.
+      2. [DUT] Add call.
+      3. Verify SCO connection and codec.
+      4. Streaming for 5 second.
+      5. Terminate call.
+      6. Verify SCO disconnection.
+      7. Verify dominant frequency of streaming data.
+    """
+
+    if (
+        self.dut.getprop(_PROPERTY_SWB_SUPPORTED) != "true"
+        and self.dut.getprop(android_constants.Property.SW_PATH_ENABLED)
+        != "true"
+    ):
+      self.skipTest("LC3 SWB is not supported on DUT.")
+
+    frame_size = 58
+    ref_tx_data_iterator = (
+        header + bytes(payload)
+        for header, payload in zip(
+            itertools.cycle(hfp_ext.SCO_H2_HEADER),
+            itertools.cycle(
+                audio.batched(
+                    resources.GetResource(_LC3_AUDIO_FILE), frame_size
+                )
+            ),
+        )
+    )
+    dut_rx_received_buffer, ref_rx_received_packets = (
+        await self._test_streaming_with_codec_negotiation(
+            preferred_codec=hfp.AudioCodec.LC3_SWB,
+            supported_audio_codecs=[
+                hfp.AudioCodec.CVSD,
+                hfp.AudioCodec.MSBC,
+                hfp.AudioCodec.LC3_SWB,
+            ],
+            ref_tx_data_iterator=ref_tx_data_iterator,
+        )
+    )
+
+    if self.dut.device.is_emulator:
+      self.logger.info("Skip codec check for emulator.")
+      return
+
+    if lc3.AVAILABLE:
+      decoder = lc3.Decoder(
+          frame_duration_us=7500,
+          sample_rate_hz=32000,
+          pcm_sample_rate_hz=32000,
+          num_channels=1,
+      )
+      ref_rx_received_buffer_decoded = _pcm_to_wave(
+          b"".join([
+              decoder.decode(
+                  # Drop header.
+                  packet.data[hfp_ext.SCO_H2_HEADER_SIZE :],
+                  lc3.PcmFormat.SIGNED_16,
+              )
+              for packet in ref_rx_received_packets
+          ]),
+          frame_rate=32000,
+      )
+      self.write_test_output_data("tx.wav", ref_rx_received_buffer_decoded)
       tx_dominant_frequency = audio.get_dominant_frequency(
-          ref_sink_buffer,
-          format="pcm",
-          frame_rate=sample_rate,
-          channels=1,
-          sample_width=2,  # 16-bit
+          ref_rx_received_buffer_decoded, format="wav"
       )
       self.logger.info("[Tx] Dominant frequency: %.2f", tx_dominant_frequency)
       self.assertAlmostEqual(tx_dominant_frequency, 1000, delta=10)
-      rx_dominant_frequency = audio.get_dominant_frequency(
-          rx_received_buffer, format="wav"
-      )
-      self.logger.info("[Rx] Dominant frequency: %.2f", rx_dominant_frequency)
-      self.assertAlmostEqual(rx_dominant_frequency, 1000, delta=10)
+
+    self.write_test_output_data("rx.wav", dut_rx_received_buffer)
+    rx_dominant_frequency = audio.get_dominant_frequency(
+        dut_rx_received_buffer, format="wav"
+    )
+    self.logger.info("[Rx] Dominant frequency: %.2f", rx_dominant_frequency)
+    self.assertAlmostEqual(rx_dominant_frequency, 1000, delta=10)
 
   @navi_test_base.parameterized(_CallAnswer.ACCEPT, _CallAnswer.REJECT)
   async def test_answer_call_from_ref(self, call_answer: _CallAnswer) -> None:
@@ -525,38 +708,29 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       call_answer: Answer type of call.
     """
     if self._is_ranchu_emulator(self.dut.device):
-      self.skipTest("Call control is not supported on Ranchu emulator")
+      self.skipTest("[DUT] Call control is not supported on Ranchu emulator.")
 
-    # [REF] Setup HFP.
-    hfp_configuration = hfp.HfConfiguration(
-        supported_hf_features=[],
-        supported_hf_indicators=[],
-        supported_audio_codecs=[hfp.AudioCodec.CVSD],
-    )
+    self.logger.info("[REF] Setup HFP server.")
     ref_hfp_protocol_queue = hfp_ext.HfProtocol.setup_server(
         self.ref.device,
         sdp_handle=_HFP_SDP_HANDLE,
-        configuration=hfp_configuration,
+        configuration=hfp_ext.make_hf_configuration(),
     )
 
-    dut_hfp_cb = self.dut.bl4a.register_callback(_Module.HFP_AG)
-    dut_telecom_cb = self.dut.bl4a.register_callback(_Module.TELECOM)
-    self.test_case_context.push(dut_hfp_cb)
-    self.test_case_context.push(dut_telecom_cb)
+    ag_cb = self.dut.bl4a.register_callback(_Module.HFP_AG)
+    telecom_cb = self.dut.bl4a.register_callback(_Module.TELECOM)
+    self.test_case_context.push(ag_cb)
+    self.test_case_context.push(telecom_cb)
 
-    self.logger.info("[DUT] Connect and pair REF.")
     await self.classic_connect_and_pair(connect_profiles=True)
 
-    async with self.assert_not_timeout(
-        _DEFAULT_STEP_TIMEOUT_SECONDS,
-        msg="[REF] Wait for HFP connected.",
-    ):
+    self.logger.info("[REF] Wait for HFP connected.")
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
       ref_hfp_protocol = await ref_hfp_protocol_queue.get()
 
     self.logger.info("[DUT] Wait for HFP connected.")
-    await dut_hfp_cb.wait_for_event(
+    await ag_cb.wait_for_event(
         bl4a_api.ProfileActiveDeviceChanged(address=self.ref.address),
-        timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
     )
 
     condition = asyncio.Condition()
@@ -572,7 +746,7 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
         _CALLER_NUMBER,
         constants.Direction.INCOMING,
     ):
-      await self._wait_for_call_state(dut_telecom_cb, _CallState.RINGING)
+      await self._wait_for_call_state(telecom_cb, _CallState.RINGING)
 
       self.logger.info("[REF] Wait for callsetup.")
       async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
@@ -587,11 +761,15 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       if call_answer == _CallAnswer.ACCEPT:
         self.logger.info("[REF] Answer call.")
         await ref_hfp_protocol.answer_incoming_call()
-        await self._wait_for_call_state(dut_telecom_cb, _CallState.ACTIVE)
+
+        self.logger.info("[DUT] Wait for call state active.")
+        await self._wait_for_call_state(telecom_cb, _CallState.ACTIVE)
       else:
         self.logger.info("[REF] Reject call.")
         await ref_hfp_protocol.reject_incoming_call()
-        await self._wait_for_call_state(dut_telecom_cb, _CallState.DISCONNECTED)
+
+        self.logger.info("[DUT] Wait for call state disconnected.")
+        await self._wait_for_call_state(telecom_cb, _CallState.DISCONNECTED)
 
   @navi_test_base.parameterized(
       constants.Direction.INCOMING,
@@ -616,32 +794,23 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       direction: The direction of phone call.
     """
 
-    # [REF] Setup HFP.
-    hfp_configuration = hfp.HfConfiguration(
-        supported_hf_features=[],
-        supported_hf_indicators=[],
-        supported_audio_codecs=[hfp.AudioCodec.CVSD],
-    )
+    self.logger.info("[REF] Setup HFP server.")
     ref_hfp_protocol_queue = hfp_ext.HfProtocol.setup_server(
         self.ref.device,
         sdp_handle=_HFP_SDP_HANDLE,
-        configuration=hfp_configuration,
+        configuration=hfp_ext.make_hf_configuration(),
     )
 
-    self.logger.info("[DUT] Connect and pair REF.")
-    with self.dut.bl4a.register_callback(_Module.HFP_AG) as dut_hfp_cb:
+    with self.dut.bl4a.register_callback(_Module.HFP_AG) as ag_cb:
       await self.classic_connect_and_pair(connect_profiles=True)
 
       self.logger.info("[DUT] Wait for HFP connected.")
-      await dut_hfp_cb.wait_for_event(
+      await ag_cb.wait_for_event(
           bl4a_api.ProfileActiveDeviceChanged(address=self.ref.address),
-          timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
       )
 
-    async with self.assert_not_timeout(
-        _DEFAULT_STEP_TIMEOUT_SECONDS,
-        msg="[REF] Wait for HFP connected.",
-    ):
+    self.logger.info("[REF] Wait for HFP connected.")
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
       ref_hfp_protocol = await ref_hfp_protocol_queue.get()
 
     ag_indicators = collections.defaultdict[
@@ -673,6 +842,7 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
               await ag_indicators[_AgIndicator.CALL_SETUP].get(),
               hfp.CallSetupAgIndicator.OUTGOING_CALL_SETUP,
           )
+
         self.logger.info("[REF] Wait for (callsetup, 3 - remote alerted).")
         async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
           self.assertEqual(
@@ -697,6 +867,9 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
             _CallAgIndicator.ACTIVE,
         )
 
+      self.logger.info("[DUT] Terminate Call.")
+      call.close()
+
     self.logger.info("[REF] Wait for (call, 0 - inactive).")
     async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
       self.assertEqual(
@@ -713,7 +886,7 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       3. Verify call ag indicator.
     """
 
-    # [REF] Setup HFP.
+    self.logger.info("[REF] Setup HFP server.")
     hfp_configuration = hfp.HfConfiguration(
         supported_hf_features=[hfp.HfFeature.HF_INDICATORS],
         supported_hf_indicators=[hfp.HfIndicator.BATTERY_LEVEL],
@@ -726,34 +899,30 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
     )
 
     with (
-        self.dut.bl4a.register_callback(_Module.HFP_AG) as dut_hfp_cb,
-        self.dut.bl4a.register_callback(_Module.ADAPTER) as dut_adapter_cb,
+        self.dut.bl4a.register_callback(_Module.HFP_AG) as ag_cb,
+        self.dut.bl4a.register_callback(_Module.ADAPTER) as adapter_cb,
     ):
       await self.classic_connect_and_pair(connect_profiles=True)
+
       self.logger.info("[DUT] Wait for HFP connected.")
-      await dut_hfp_cb.wait_for_event(
+      await ag_cb.wait_for_event(
           bl4a_api.ProfileActiveDeviceChanged(address=self.ref.address),
-          timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
       )
 
-      async with self.assert_not_timeout(
-          _DEFAULT_STEP_TIMEOUT_SECONDS,
-          msg="[REF] Wait for HFP connected.",
-      ):
+      self.logger.info("[REF] Wait for HFP connected.")
+      async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
         ref_hfp_protocol = await ref_hfp_protocol_queue.get()
 
       if not ref_hfp_protocol.supports_ag_feature(hfp.AgFeature.HF_INDICATORS):
-        raise signals.TestSkip("DUT doesn't support HF Indicator")
+        raise signals.TestSkip("[REF] Does not support HF Indicator")
 
       for i in range(101):
         await ref_hfp_protocol.execute_command(
             f"AT+BIEV={hfp.HfIndicator.BATTERY_LEVEL.value},{i}"
         )
-        event = await dut_adapter_cb.wait_for_event(
-            bl4a_api.BatteryLevelChanged,
-            predicate=lambda e: (e.address == self.ref.address),
+        await adapter_cb.wait_for_event(
+            bl4a_api.BatteryLevelChanged(address=self.ref.address, level=i),
         )
-        self.assertEqual(event.level, i)
 
   async def test_connect_hf_during_call_should_route_to_hf(self) -> None:
     """Tests connecting HFP during phone call should route to HFP.
@@ -763,40 +932,41 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       2. Setup HFP connection.
     """
 
-    # [REF] Setup HFP.
-    hfp_configuration = hfp.HfConfiguration(
-        supported_hf_features=[],
-        supported_hf_indicators=[],
-        supported_audio_codecs=[hfp.AudioCodec.CVSD],
-    )
+    self.logger.info("[REF] Setup HFP server.")
     hfp_ext.HfProtocol.setup_server(
         self.ref.device,
         sdp_handle=_HFP_SDP_HANDLE,
-        configuration=hfp_configuration,
+        configuration=hfp_ext.make_hf_configuration(),
     )
 
     self.logger.info("[DUT] Make outgoing call.")
     with (
-        self.dut.bl4a.register_callback(_Module.TELECOM) as dut_telecom_cb,
+        self.dut.bl4a.register_callback(_Module.TELECOM) as telecom_cb,
         self.dut.bl4a.make_phone_call(
             _CALLER_NAME,
             _CALLER_NUMBER,
             constants.Direction.OUTGOING,
         ),
     ):
+      self.logger.info("[DUT] Set repeat mode to one.")
       self.dut.bt.audioSetRepeat(android_constants.RepeatMode.ONE)
+
+      self.logger.info("[DUT] Play sine wave.")
       self.dut.bt.audioPlaySine()
 
       await self._wait_for_call_state(
-          dut_telecom_cb, _CallState.CONNECTING, _CallState.DIALING
+          telecom_cb, _CallState.CONNECTING, _CallState.DIALING
       )
 
-      self.logger.info("[DUT] Connect and pair REF.")
-      with self.dut.bl4a.register_callback(_Module.HFP_AG) as dut_hfp_cb:
+      with self.dut.bl4a.register_callback(_Module.HFP_AG) as ag_cb:
         await self.classic_connect_and_pair(connect_profiles=True)
 
         self.logger.info("[DUT] Wait for SCO connected.")
-        await self._wait_for_sco_state(dut_hfp_cb, _ScoState.CONNECTED)
+        await ag_cb.wait_for_event(
+            _HfpAgAudioStateChange(
+                address=self.ref.address, state=_ScoState.CONNECTED
+            )
+        )
 
   @navi_test_base.parameterized(constants.TestRole.DUT, constants.TestRole.REF)
   @navi_test_base.retry(max_count=2)
@@ -813,10 +983,12 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
     Args:
       issuer: The issuer of volume adjustment.
     """
-    if self._is_ranchu_emulator(self.dut.device):
-      self.skipTest("Volume control is not supported on Ranchu emulator")
-    if self.dut.device.is_emulator:
-      self.skipTest("b/422822911: SCO is not fully supported on emulator")
+    if (
+        self.dut.device.is_emulator
+        and self.dut.getprop(android_constants.Property.SCO_MANAGED_BY_AUDIO)
+        != "true"
+    ):
+      self.skipTest("Volume control is only available with AMSCO on emulator")
 
     # [REF] Setup HFP.
     hfp_configuration = hfp.HfConfiguration(
@@ -830,10 +1002,9 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
         configuration=hfp_configuration,
     )
 
-    self.logger.info("[DUT] Connect and pair REF.")
     with (
-        self.dut.bl4a.register_callback(_Module.HFP_AG) as dut_hfp_cb,
-        self.dut.bl4a.register_callback(_Module.AUDIO) as dut_audio_cb,
+        self.dut.bl4a.register_callback(_Module.HFP_AG) as ag_cb,
+        self.dut.bl4a.register_callback(_Module.AUDIO) as audio_cb,
         self.dut.bl4a.make_phone_call(
             _CALLER_NAME,
             _CALLER_NUMBER,
@@ -846,24 +1017,28 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       self.dut.bt.audioPlaySine()
 
       self.logger.info("[DUT] Wait for SCO connected.")
-      await self._wait_for_sco_state(dut_hfp_cb, _ScoState.CONNECTED)
-      async with self.assert_not_timeout(
-          _DEFAULT_STEP_TIMEOUT_SECONDS,
-          msg="[REF] Wait for HFP connected.",
-      ):
+      await ag_cb.wait_for_event(
+          _HfpAgAudioStateChange(
+              address=self.ref.address, state=_ScoState.CONNECTED
+          )
+      )
+
+      self.logger.info("[REF] Wait for HFP connected.")
+      async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
         ref_hfp_protocol = await ref_hfp_protocol_queue.get()
 
       if not self.dut.device.is_emulator:
         self.logger.info("[DUT] Wait for SCO active.")
-        await dut_audio_cb.wait_for_event(
+        await audio_cb.wait_for_event(
             bl4a_api.CommunicationDeviceChanged(
                 self.ref.address,
                 device_type=android_constants.AudioDeviceType.BLUETOOTH_SCO,
             )
         )
 
-      # Somehow volume change cannot be broadcasted to Bluetooth at the moment
+      # Volume change cannot be broadcasted to Bluetooth at the moment
       # when SCO becomes active.
+      self.logger.info("[DUT] Wait for volume change to be ready.")
       await asyncio.sleep(0.5)
 
       for expected_volume in range(1, _HFP_MAX_VOLUME + 1):
@@ -885,8 +1060,8 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
           await ref_hfp_protocol.execute_command(f"AT+VGS={expected_volume}")
 
           self.logger.info("[DUT] Wait for volume changed event.")
-          await dut_audio_cb.wait_for_event(
-              event=bl4a_api.VolumeChanged(
+          await audio_cb.wait_for_event(
+              bl4a_api.VolumeChanged(
                   stream_type=_STREAM_TYPE_CALL, volume_value=expected_volume
               ),
           )
@@ -902,30 +1077,22 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       5. Query call status from HF.
     """
 
-    # [REF] Setup HFP.
-    hfp_configuration = hfp.HfConfiguration(
-        supported_hf_features=[],
-        supported_hf_indicators=[],
-        supported_audio_codecs=[hfp.AudioCodec.CVSD],
-    )
+    self.logger.info("[REF] Setup HFP server.")
     ref_hfp_protocol_queue = hfp_ext.HfProtocol.setup_server(
         self.ref.device,
         sdp_handle=_HFP_SDP_HANDLE,
-        configuration=hfp_configuration,
+        configuration=hfp_ext.make_hf_configuration(),
     )
 
-    self.logger.info("[DUT] Connect and pair REF.")
-    with self.dut.bl4a.register_callback(_Module.HFP_AG) as dut_hfp_cb:
+    with self.dut.bl4a.register_callback(_Module.HFP_AG) as ag_cb:
       await self.classic_connect_and_pair(connect_profiles=True)
-      await dut_hfp_cb.wait_for_event(
+
+      await ag_cb.wait_for_event(
           bl4a_api.ProfileActiveDeviceChanged(address=self.ref.address),
-          timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
       )
 
-      async with self.assert_not_timeout(
-          _DEFAULT_STEP_TIMEOUT_SECONDS,
-          msg="[REF] Wait for HFP connected.",
-      ):
+      self.logger.info("[REF] Wait for HFP connected.")
+      async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
         ref_hfp_protocol = await ref_hfp_protocol_queue.get()
 
     ag_indicators = collections.defaultdict[
@@ -975,32 +1142,24 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       4. Unhold the call.
     """
     if self._is_ranchu_emulator(self.dut.device):
-      self.skipTest("Call hold is not supported on Ranchu emulator")
+      self.skipTest("[DUT] Call hold is not supported on Ranchu emulator.")
 
-    # [REF] Setup HFP.
-    hfp_configuration = hfp.HfConfiguration(
-        supported_hf_features=[hfp.HfFeature.THREE_WAY_CALLING],
-        supported_hf_indicators=[],
-        supported_audio_codecs=[hfp.AudioCodec.CVSD],
-    )
+    self.logger.info("[REF] Setup HFP server.")
     ref_hfp_protocol_queue = hfp_ext.HfProtocol.setup_server(
         self.ref.device,
         sdp_handle=_HFP_SDP_HANDLE,
-        configuration=hfp_configuration,
+        configuration=hfp_ext.make_hf_configuration(),
     )
 
-    self.logger.info("[DUT] Connect and pair REF.")
-    with self.dut.bl4a.register_callback(_Module.HFP_AG) as dut_hfp_cb:
+    with self.dut.bl4a.register_callback(_Module.HFP_AG) as ag_cb:
       await self.classic_connect_and_pair(connect_profiles=True)
-      await dut_hfp_cb.wait_for_event(
+
+      await ag_cb.wait_for_event(
           bl4a_api.ProfileActiveDeviceChanged(address=self.ref.address),
-          timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
       )
 
-      async with self.assert_not_timeout(
-          _DEFAULT_STEP_TIMEOUT_SECONDS,
-          msg="[REF] Wait for HFP connected.",
-      ):
+      self.logger.info("[REF] Wait for HFP connected.")
+      async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
         ref_hfp_protocol = await ref_hfp_protocol_queue.get()
 
     ag_indicators = collections.defaultdict[
@@ -1016,7 +1175,7 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
 
     self.logger.info("[DUT] Make incoming call.")
     with (
-        self.dut.bl4a.register_callback(_Module.TELECOM) as dut_telecom_cb,
+        self.dut.bl4a.register_callback(_Module.TELECOM) as telecom_cb,
         self.dut.bl4a.make_phone_call(
             _CALLER_NAME,
             _CALLER_NUMBER,
@@ -1024,25 +1183,27 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
         ) as call,
     ):
       # 25Q1 => CONNECTING, 25Q2 -> DIALING
+      self.logger.info("[DUT] Wait for call state to be CONNECTING or DIALING.")
       await self._wait_for_call_state(
-          dut_telecom_cb, _CallState.CONNECTING, _CallState.DIALING
+          telecom_cb, _CallState.CONNECTING, _CallState.DIALING
       )
+
+      self.logger.info("[REF] Answer call.")
       call.answer()
-      await self._wait_for_call_state(dut_telecom_cb, _CallState.ACTIVE)
+
+      self.logger.info("[DUT] Wait for call state to be ACTIVE.")
+      await self._wait_for_call_state(telecom_cb, _CallState.ACTIVE)
 
       self.logger.info("[REF] Hold call.")
       await ref_hfp_protocol.execute_command("AT+CHLD=2")
 
       self.logger.info("[DUT] Wait for call state to be HOLDING.")
-      await self._wait_for_call_state(dut_telecom_cb, _CallState.HOLDING)
+      await self._wait_for_call_state(telecom_cb, _CallState.HOLDING)
 
-      async with self.assert_not_timeout(
-          _DEFAULT_STEP_TIMEOUT_SECONDS,
-          msg="[REF] Wait for call state to be HOLDING.",
-      ):
-        call_setup_state = await ag_indicators[_AgIndicator.CALL_HELD].get()
+      self.logger.info("[REF] Wait for call state to be HOLDING.")
+      async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
         self.assertEqual(
-            call_setup_state,
+            await ag_indicators[_AgIndicator.CALL_HELD].get(),
             hfp.CallHeldAgIndicator.CALL_ON_HOLD_NO_ACTIVE_CALL,
         )
 
@@ -1050,15 +1211,13 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       await ref_hfp_protocol.execute_command("AT+CHLD=2")
 
       self.logger.info("[DUT] Wait for call state to be ACTIVE.")
-      await self._wait_for_call_state(dut_telecom_cb, _CallState.ACTIVE)
+      await self._wait_for_call_state(telecom_cb, _CallState.ACTIVE)
 
-      async with self.assert_not_timeout(
-          _DEFAULT_STEP_TIMEOUT_SECONDS,
-          msg="[REF] Wait for call state to be NO_CALLS_HELD.",
-      ):
-        call_setup_state = await ag_indicators[_AgIndicator.CALL_HELD].get()
+      self.logger.info("[REF] Wait for call state to be NO_CALLS_HELD.")
+      async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
         self.assertEqual(
-            call_setup_state, hfp.CallHeldAgIndicator.NO_CALLS_HELD
+            await ag_indicators[_AgIndicator.CALL_HELD].get(),
+            hfp.CallHeldAgIndicator.NO_CALLS_HELD,
         )
 
   @navi_test_base.named_parameterized(
@@ -1076,7 +1235,7 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
     Args:
       initiator: The initiator of voice recognition process.
     """
-    # [REF] Setup HFP.
+    self.logger.info("[REF] Setup HF server.")
     hfp_configuration = hfp.HfConfiguration(
         supported_hf_features=[
             hfp.HfFeature.THREE_WAY_CALLING,
@@ -1091,25 +1250,27 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
         configuration=hfp_configuration,
     )
 
-    dut_hfp_cb = self.dut.bl4a.register_callback(_Module.HFP_AG)
-    self.test_case_context.push(dut_hfp_cb)
+    ag_cb = self.dut.bl4a.register_callback(_Module.HFP_AG)
+    self.test_case_context.push(ag_cb)
 
     await self.classic_connect_and_pair(connect_profiles=True)
+
     self.logger.info("[DUT] Wait for HFP connected.")
-    await dut_hfp_cb.wait_for_event(
+    await ag_cb.wait_for_event(
         bl4a_api.ProfileActiveDeviceChanged(address=self.ref.address),
-        timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
     )
 
-    self.logger.info("[REF] Wait for HFP connected.")
     async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      self.logger.info("[REF] Wait for HFP connected.")
       ref_hfp_protocol = await ref_hfp_protocol_queue.get()
+
+      self.logger.info("[REF] Wait for SLC initialized.")
       await ref_hfp_protocol.slc_initialized.wait()
 
     if not ref_hfp_protocol.supports_ag_feature(
         hfp.AgFeature.VOICE_RECOGNITION_FUNCTION
     ):
-      self.skipTest("REF doesn't support voice recognition activation")
+      self.skipTest("[REF] Doesn't support voice recognition activation.")
 
     vr_state = [hfp.VoiceRecognitionState.DISABLE]
     condition = asyncio.Condition()
@@ -1128,16 +1289,19 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       # Android stack doesn't reply BVRA until
       # BluetoothHeadset.startVoiceRecognition() is called, so it must be
       # executed asynchronously.
+      self.logger.info("[REF] Send AT+BVRA=1 to HF.")
       activation_task = asyncio.create_task(
           ref_hfp_protocol.execute_command(
               "AT+BVRA=1", timeout=_DEFAULT_STEP_TIMEOUT_SECONDS
           )
       )
+
       self.logger.info("[DUT] Wait for voice recognition to be enabled.")
       await voice_command_callback.wait_for_event(
           bl4a_api.VoiceCommand(state=True),
           timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
       )
+
     # DUT always needs startVoiceRecognition() to:
     #   1. (HF-initiated) Send OK response for AT+BVRA.
     #   2. (AG-initiated) Send +BVRA=1 as AG-initiated voice recognition.
@@ -1161,11 +1325,16 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
     self.test_case_context.push(recorder)
 
     self.logger.info("[DUT] Wait for SCO connected.")
-    await self._wait_for_sco_state(dut_hfp_cb, _ScoState.CONNECTED)
+    await ag_cb.wait_for_event(
+        _HfpAgAudioStateChange(
+            address=self.ref.address, state=_ScoState.CONNECTED
+        )
+    )
 
     if initiator == constants.TestRole.DUT:
       self.logger.info("[DUT] Stop voice recognition.")
       self.dut.bt.hfpAgStopVoiceRecognition(self.ref.address)
+
       self.logger.info("[REF] Wait for voice recognition to be disabled.")
       async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
         async with condition:
@@ -1189,10 +1358,15 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
             timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
         )
 
+    self.logger.info("[DUT] Stop audio recording.")
     recorder.close()
 
     self.logger.info("[DUT] Wait for SCO disconnected.")
-    await self._wait_for_sco_state(dut_hfp_cb, _ScoState.DISCONNECTED)
+    await ag_cb.wait_for_event(
+        _HfpAgAudioStateChange(
+            address=self.ref.address, state=_ScoState.DISCONNECTED
+        )
+    )
 
 
 if __name__ == "__main__":

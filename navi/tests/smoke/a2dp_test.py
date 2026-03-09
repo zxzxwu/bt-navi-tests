@@ -44,31 +44,6 @@ _StreamType: TypeAlias = android_constants.StreamType
 _A2dpCodec = a2dp_ext.A2dpCodec
 
 
-class LocalSinkWrapper:
-  """Wrapper for LocalSink to provide start/suspend events."""
-
-  def __init__(self, impl: avdtp.LocalSink):
-    self.impl = impl
-    self.condition = asyncio.Condition()
-    for command in (
-        impl.EVENT_CONFIGURATION,
-        impl.EVENT_OPEN,
-        impl.EVENT_START,
-        impl.EVENT_SUSPEND,
-        impl.EVENT_CLOSE,
-        impl.EVENT_ABORT,
-    ):
-      self.impl.on(command, self._on_command)
-
-  async def _on_command(self) -> None:
-    async with self.condition:
-      self.condition.notify_all()
-
-  @property
-  def stream_state(self) -> int | None:
-    return self.impl.stream.state if self.impl.stream else None
-
-
 class A2dpTest(navi_test_base.TwoDevicesTestBase):
   dut_supported_codecs: list[_A2dpCodec]
 
@@ -413,7 +388,7 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
       )
       if not ref_sinks:
         self.fail("No sink found for codec %s." % preferred_codec.name)
-      ref_sink = LocalSinkWrapper(ref_sinks[0])
+      ref_sink = a2dp_ext.LocalSinkWrapper(ref_sinks[0])
 
       # If there is a playback, wait until it ends.
       if self.dut.bt.isA2dpPlaying(self.ref.address):
