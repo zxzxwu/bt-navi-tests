@@ -1,4 +1,4 @@
-#  Copyright 2025 Google LLC
+#  Copyright 2026 Google LLC
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -45,7 +45,7 @@ _Property = android_constants.GattCharacteristicProperty
 _Permission = android_constants.GattCharacteristicPermission
 
 
-class GattServerTest(navi_test_base.TwoDevicesTestBase):
+class GattServerVentiTest(navi_test_base.TwoDevicesTestBase):
   """Tests for GATT Server role."""
 
   dut_name: str

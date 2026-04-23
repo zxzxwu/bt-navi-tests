@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 The Android Open Source Project
+ * Copyright 2026 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -278,4 +278,6 @@ object SnippetConstants {
     const val FIELD_BROWSABLE = "browsable"
     const val FIELD_PLAYABLE = "playable"
     const val FIELD_CHILDREN = "children"
+    const val PAIRING_ALGORITHM = "pairing_algorithm"
+    const val PAIRING_VARIANT = "pairing_variant"
 }

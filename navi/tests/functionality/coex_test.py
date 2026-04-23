@@ -1,4 +1,4 @@
-#  Copyright 2025 Google LLC
+#  Copyright 2026 Google LLC
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -421,11 +421,17 @@ class CoexTest(navi_test_base.MultiDevicesTestBase):
       ref_hfp_protocols.put_nowait(hfp.AgProtocol(dlc, ag_configuration))
 
     self.refs[1].device.sdp_service_records = {
-        _HFP_AG_SDP_HANDLE: hfp_ext.AudioGatewaySdpRecord(
-            service_record_handle=_HFP_AG_SDP_HANDLE,
-            rfcomm_channel=rfcomm.Server(self.refs[1].device).listen(on_dlc),
-            version=hfp.ProfileVersion.V1_8,
-            supported_features=hfp_ext.make_ag_sdp_features(ag_configuration),
+        _HFP_AG_SDP_HANDLE: (
+            hfp_ext.AudioGatewaySdpRecord(
+                service_record_handle=_HFP_AG_SDP_HANDLE,
+                rfcomm_channel=rfcomm.Server(self.refs[1].device).listen(
+                    on_dlc
+                ),
+                version=hfp.ProfileVersion.V1_8,
+                supported_features=hfp_ext.make_ag_sdp_features(
+                    ag_configuration
+                ),
+            ).to_service_attributes()
         )
     }
 

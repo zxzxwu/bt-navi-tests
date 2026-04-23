@@ -1,4 +1,4 @@
-#  Copyright 2025 Google LLC
+#  Copyright 2026 Google LLC
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -272,3 +272,5 @@ FIELD_ALBUM = "album"
 FIELD_BROWSABLE = "browsable"
 FIELD_PLAYABLE = "playable"
 FIELD_CHILDREN = "children"
+PAIRING_ALGORITHM = "pairing_algorithm"
+PAIRING_VARIANT = "pairing_variant"

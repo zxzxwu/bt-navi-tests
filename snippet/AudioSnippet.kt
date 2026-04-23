@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 The Android Open Source Project
+ * Copyright 2026 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -462,16 +462,15 @@ class AudioSnippet : Snippet {
         throw IllegalArgumentException("Unable to set preferred device $preferredDevice")
       }
     }
-    val deferred =
-      coroutineScope.async {
-        val outputBuffer = mutableListOf<Byte>()
-        val buffer = ByteArray(bufferSize)
-        while (recorder.read(buffer, 0, buffer.size) > 0) {
-          outputBuffer.addAll(buffer.asList())
-        }
-        Log.d(TAG, "Recording ${outputPath} stopped")
-        outputBuffer
+    val deferred = coroutineScope.async {
+      val outputBuffer = mutableListOf<Byte>()
+      val buffer = ByteArray(bufferSize)
+      while (recorder.read(buffer, 0, buffer.size) > 0) {
+        outputBuffer.addAll(buffer.asList())
       }
+      Log.d(TAG, "Recording ${outputPath} stopped")
+      outputBuffer
+    }
     recorder.startRecording()
     recorders[outputPath] = Pair(recorder, deferred)
   }

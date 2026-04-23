@@ -1,4 +1,4 @@
-#  Copyright 2025 Google LLC
+#  Copyright 2026 Google LLC
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -120,7 +120,7 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
     self.test_case_context.push(dut_cb)
 
     ref_dut_acl: device.Connection
-    auth_task: asyncio.tasks.Task | None = None
+    auth_task: asyncio.Task[None] | None = None
     if pairing_direction == _Direction.OUTGOING:
       self.logger.info("[REF] Prepare to accept connection.")
       ref_accept_task = asyncio.tasks.create_task(
@@ -296,7 +296,7 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
             self.ref.device, "key_store_update"
         )
 
-      pair_task: asyncio.tasks.Task | None = None
+      pair_task: asyncio.Task[None] | None = None
       if ref_dut_acl.role == _Role.CENTRAL:
         self.logger.info("[REF] Initiate SMP pairing.")
         pair_task = asyncio.tasks.create_task(ref_dut_acl.pair())

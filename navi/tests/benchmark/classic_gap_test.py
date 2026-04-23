@@ -1,4 +1,4 @@
-#  Copyright 2025 Google LLC
+#  Copyright 2026 Google LLC
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -229,7 +229,7 @@ class ClassicGapTest(test_base.PerformanceTestBase):
     self.test_case_context.push(dut_cb)
     ref_addr = str(self.ref.address)
     begin = datetime.datetime.now()
-    auth_task: asyncio.tasks.Task | None = None
+    auth_task: asyncio.Task[None] | None = None
     if pairing_direction == _Direction.OUTGOING:
       self.logger.info("[REF] Prepare to accept connection.")
       ref_accept_task = asyncio.tasks.create_task(

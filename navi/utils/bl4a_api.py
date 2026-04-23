@@ -1,4 +1,4 @@
-#  Copyright 2025 Google LLC
+#  Copyright 2026 Google LLC
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import enum
 import inspect
 import itertools
 import logging
+import time
 from typing import Any, ClassVar, Self, Type, TypeVar, cast
 
 from bumble import hci
@@ -267,6 +268,9 @@ class CallbackHandler:
         got = await asyncio.to_thread(
             lambda: self.handler.waitAndGet(event.EVENT_NAME, timeout)
         )
+      got.data['creation_time'] = datetime.datetime.fromtimestamp(
+          got.creation_time / 1000
+      )
     except mobly.snippet.errors.CallbackHandlerTimeoutError:
       raise errors.AsyncTimeoutError(
           timeout_msg
@@ -323,10 +327,18 @@ class JsonDeserializable:
     return cls(**kwargs)
 
 
+@dataclasses.dataclass
 class JsonDeserializableEvent(JsonDeserializable):
   """Base class for JSON deserializable events."""
 
   EVENT_NAME: ClassVar[str]
+  creation_time: datetime.datetime = dataclasses.field(
+      default_factory=datetime.datetime.now,
+      kw_only=True,
+      repr=False,
+      hash=False,
+      compare=False,
+  )
 
 
 @dataclasses.dataclass
@@ -567,10 +579,17 @@ class EncryptionChanged(JsonDeserializableEvent):
 
   Attributes:
     address: mac address of remote device in string format.
+    transport: transport of the encryption changed connection.
   """
 
   address: str = dataclasses.field(
       metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  transport: android_constants.Transport = dataclasses.field(
+      metadata={
+          _FIELD: snippet_constants.FIELD_TRANSPORT,
+          _MAPPER: android_constants.Transport,
+      }
   )
 
   EVENT_NAME = snippet_constants.ENCRYPTION_CHANGE
@@ -3495,7 +3514,7 @@ class SnippetWrapper:
         direction=direction,
     )
 
-  def start_audio_recording(
+  async def start_audio_recording(
       self,
       path: str,
       source: AudioRecorder.Source = AudioRecorder.Source.DEFAULT,
@@ -3513,12 +3532,14 @@ class SnippetWrapper:
     Returns:
       The audio recorder control block.
     """
-    return AudioRecorder(
-        self.snippet,
-        path=path,
-        source=source,
-        preferred_device_address=preferred_device_address,
-        preferred_device_type=preferred_device_type,
+    return await asyncio.to_thread(
+        lambda: AudioRecorder(
+            self.snippet,
+            path=path,
+            source=source,
+            preferred_device_address=preferred_device_address,
+            preferred_device_type=preferred_device_type,
+        )
     )
 
   def create_bond_oob(

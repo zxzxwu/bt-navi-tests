@@ -1,4 +1,4 @@
-#  Copyright 2025 Google LLC
+#  Copyright 2026 Google LLC
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -306,11 +306,9 @@ class VapTest(navi_test_base.TwoDevicesTestBase):
 
       # Initialize Voice Recognition as audio source
       self.logger.info("[DUT] Start audio playback and recording.")
-      audio_recorder = await asyncio.to_thread(
-          lambda: self.dut.bl4a.start_audio_recording(
-              _RECORDING_PATH,
-              source=bl4a_api.AudioRecorder.Source.VOICE_RECOGNITION,
-          )
+      audio_recorder = await self.dut.bl4a.start_audio_recording(
+          _RECORDING_PATH,
+          source=bl4a_api.AudioRecorder.Source.VOICE_RECOGNITION,
       )
       self.test_case_context.push(audio_recorder)
       await asyncio.to_thread(self.dut.bt.audioPlaySine)

@@ -1,4 +1,4 @@
-#  Copyright 2025 Google LLC
+#  Copyright 2026 Google LLC
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -275,7 +275,7 @@ class LePairingTest(navi_test_base.TwoDevicesTestBase):
     # ##############################################
 
     ref_dut: device.Connection
-    pair_task: asyncio.Task | None = None
+    pair_task: asyncio.Task[None] | None = None
     if connection_direction == _Direction.OUTGOING:
       if pairing_direction == _Direction.INCOMING:
         ref_dut = await self._make_outgoing_connection(
@@ -491,7 +491,7 @@ class LePairingTest(navi_test_base.TwoDevicesTestBase):
 
     # ####################### Connecting ##########################
     ref_dut: device.Connection
-    pair_task: asyncio.Task | None = None
+    pair_task: asyncio.Task[None] | None = None
     if connection_direction == _Direction.OUTGOING:
       if pairing_direction == _Direction.INCOMING:
         ref_dut = await self._make_outgoing_connection(
@@ -775,6 +775,91 @@ class LePairingTest(navi_test_base.TwoDevicesTestBase):
     self.logger.info('[REF] Wait for pairing complete.')
     async with self.assert_not_timeout(_DEFAULT_SETUP_TIMEOUT_SECONDS):
       await ref_pairing_events.get()
+
+  @navi_test_base.named_parameterized(
+      public=pairing.PairingConfig.AddressType.PUBLIC,
+      random=pairing.PairingConfig.AddressType.RANDOM,
+  )
+  async def test_pairing_with_rpa(
+      self,
+      identity_address_type: pairing.PairingConfig.AddressType,
+  ) -> None:
+    """Tests pairing with RPA, make sure the identity address is associated with the bond.
+
+    Test steps:
+      1. Generate a RPA for the REF device.
+      2. Start advertising on REF with RPA.
+      3. Connect and bond to REF over LE on DUT.
+      4. Verify final states.
+
+    Args:
+      identity_address_type: Identity address type of the REF device.
+    """
+    ref_rpa = hci.Address.generate_private_address(self.ref.device.irk)
+    ref_rpa_str = str(ref_rpa).upper()
+    self.ref.device.pairing_config_factory = lambda _: pairing.PairingConfig(
+        identity_address_type=identity_address_type
+    )
+
+    self.logger.info('[REF] Start advertising with RPA: %s', ref_rpa)
+    await self.ref.device.create_advertising_set(
+        random_address=ref_rpa,
+        auto_start=True,
+        auto_restart=False,
+    )
+
+    adapter_cb = self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER)
+    self.test_case_context.push(adapter_cb)
+
+    self.logger.info('[DUT] Connect and bond to REF over LE.')
+    self.dut.bt.createBond(
+        ref_rpa_str,
+        android_constants.Transport.LE,
+        android_constants.AddressTypeStatus.RANDOM,
+    )
+
+    self.logger.info('[DUT] Wait for pairing request.')
+    await adapter_cb.wait_for_event(
+        bl4a_api.PairingRequest(
+            address=ref_rpa_str,
+            variant=matcher.ANY,
+            pin=matcher.ANY,
+        ),
+        timeout=_DEFAULT_SETUP_TIMEOUT_SECONDS,
+    )
+
+    self.logger.info('[DUT] Provide pairing confirmation.')
+    self.dut.bt.setPairingConfirmation(ref_rpa_str, True)
+
+    self.logger.info('[DUT] Wait for bond state changed.')
+    bond_state_changed_event = await adapter_cb.wait_for_event(
+        bl4a_api.BondStateChanged(
+            address=ref_rpa_str,
+            state=matcher.any_of(*_TERMINATED_BOND_STATES),
+        ),
+        timeout=_DEFAULT_SETUP_TIMEOUT_SECONDS,
+    )
+    self.assertEqual(
+        bond_state_changed_event.state,
+        android_constants.BondState.BONDED,
+        '[DUT] Bond state is not BONDED.',
+    )
+
+    # Verify that the identity address is associated with the bond.
+    if identity_address_type == pairing.PairingConfig.AddressType.PUBLIC:
+      ref_identity_address = self.ref.address
+    else:
+      ref_identity_address = self.ref.random_address
+    self.assertEqual(
+        self.dut.bt.getBondState(ref_identity_address),
+        android_constants.BondState.BONDED,
+        '[DUT] Bond state is not BONDED for identity address.',
+    )
+    self.assertEqual(
+        self.dut.bt.getIdentityAddress(ref_rpa_str),
+        ref_identity_address,
+        '[DUT] Identity address does not match.',
+    )
 
 
 if __name__ == '__main__':

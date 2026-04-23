@@ -1,4 +1,4 @@
-#  Copyright 2025 Google LLC
+#  Copyright 2026 Google LLC
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -60,7 +60,7 @@ class L2capTest(navi_test_base.TwoDevicesTestBase):
       )
       async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):
         if ref_dut_acl:
-          with contextlib.suppress(hci.HCI_StatusError):
+          with contextlib.suppress(hci.HCI_Error, hci.HCI_StatusError):
             await ref_dut_acl.disconnect()
         await self.ref.device.power_off()
         await self.ref.device.power_on()

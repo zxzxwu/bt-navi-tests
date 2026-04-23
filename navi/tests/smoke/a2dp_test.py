@@ -1,4 +1,4 @@
-#  Copyright 2025 Google LLC
+#  Copyright 2026 Google LLC
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -34,8 +34,16 @@ from navi.utils import constants
 _A2DP_SERVICE_RECORD_HANDLE = 1
 _DEFAULT_STEP_TIMEOUT_SECONDS = 5.0
 _DEFAULT_STREAM_DURATION_SECONDS = 3.0
+_FLAG_A2DP_OFFLOAD_USER_CODEC_SELECTION = (
+    "com.android.bluetooth.flags.a2dp_offload_user_codec_selection"
+)
+_PROPERTY_A2DP_OFFLOAD_SUPPORTED = "ro.bluetooth.a2dp_offload.supported"
 _PROPERTY_CODEC_PRIORITY = "bluetooth.a2dp.source.%s_priority.config"
 _PROPERTY_OPUS_ENABLED = "persist.bluetooth.opus.enabled"
+_PROPERTY_VND_AUDIO_A2DP_CODEC_EXTENSIBILITY = (
+    "persist.vendor.audio.a2dp_codec_extensibility"
+)
+_PROPERTY_VND_AUDIO_LEAUDIO_SW_OFFLOAD = "persist.vendor.audio.sw_offload"
 _VALUE_CODEC_DISABLED = -1
 
 _Issuer = constants.TestRole
@@ -71,6 +79,22 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
             or self.dut.getprop(_PROPERTY_OPUS_ENABLED) == "true"
         )
     ]
+
+    # TODO: Remove this once the flag is removed.
+    if (
+        (self.dut.getprop(_PROPERTY_A2DP_OFFLOAD_SUPPORTED) == "true")
+        and (
+            self.dut.getprop(_PROPERTY_VND_AUDIO_A2DP_CODEC_EXTENSIBILITY)
+            == "true"
+        )
+        and (self.dut.getprop(_PROPERTY_VND_AUDIO_LEAUDIO_SW_OFFLOAD) == "true")
+    ):
+      if not self.setflag_for_class_context(
+          _FLAG_A2DP_OFFLOAD_USER_CODEC_SELECTION, True
+      ):
+        raise signals.TestAbortClass(
+            f"Failed to set flag {_FLAG_A2DP_OFFLOAD_USER_CODEC_SELECTION}"
+        )
 
   @override
   async def async_teardown_test(self) -> None:
@@ -141,27 +165,6 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
 
     return ref_avdtp_connection
 
-  async def _terminate_connection_from_ref(self) -> None:
-    with self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER) as dut_cb:
-      ref_acl = self.ref.device.find_connection_by_bd_addr(
-          hci.Address(self.dut.address),
-          transport=bumble.core.PhysicalTransport.BR_EDR,
-      )
-      if ref_acl is None:
-        self.logger.info("[REF] No ACL connection found.")
-        return
-
-      self.logger.info("[REF] Disconnect.")
-      await ref_acl.disconnect()
-
-      self.logger.info("[DUT] Wait for ACL disconnected.")
-      await dut_cb.wait_for_event(
-          bl4a_api.AclDisconnected(
-              address=self.ref.address,
-              transport=android_constants.Transport.CLASSIC,
-          ),
-      )
-
   async def test_pair_and_connect(self) -> None:
     """Tests A2DP connection after pairing.
 
@@ -201,7 +204,10 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
       6. Wait for A2DP disconnected on DUT.
     """
     await self.test_pair_and_connect()
-    await self._terminate_connection_from_ref()
+
+    await self.disconnect_with_check(
+        self.ref.address, android_constants.Transport.CLASSIC
+    )
 
     with self.dut.bl4a.register_callback(bl4a_api.Module.A2DP) as dut_cb:
       self.logger.info("[DUT] Reconnect.")
@@ -244,7 +250,10 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
       6. Wait A2DP disconnected on DUT.
     """
     await self.test_pair_and_connect()
-    await self._terminate_connection_from_ref()
+
+    await self.disconnect_with_check(
+        self.ref.address, android_constants.Transport.CLASSIC
+    )
 
     with self.dut.bl4a.register_callback(bl4a_api.Module.A2DP) as dut_cb:
       self.logger.info("[REF] Reconnect.")

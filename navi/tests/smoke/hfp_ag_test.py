@@ -1,4 +1,4 @@
-#  Copyright 2025 Google LLC
+#  Copyright 2026 Google LLC
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -55,6 +55,13 @@ _MAX_FRAME_SIZE = 240
 _ACTION_VOICE_COMMAND = "android.intent.action.VOICE_COMMAND"
 _MSBC_AUDIO_FILE = "navi/tests/data/sine1000hz_16khz_1s.sbc"
 _LC3_AUDIO_FILE = "navi/tests/data/sine1000hz_32khz_1s.lc3"
+_AG_SDP_FEATURE_MASK = (
+    hfp.AgSdpFeature.THREE_WAY_CALLING
+    | hfp.AgSdpFeature.EC_NR
+    | hfp.AgSdpFeature.VOICE_RECOGNITION_FUNCTION
+    | hfp.AgSdpFeature.IN_BAND_RING_TONE_CAPABILITY
+    | hfp.AgSdpFeature.VOICE_TAG
+)
 
 _AudioCodec = hfp.AudioCodec
 _AgIndicator = hfp.AgIndicator
@@ -127,6 +134,15 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
   async def async_teardown_test(self) -> None:
     self.logger.info("[DUT] Stop audio.")
     self.dut.bt.audioStop()
+
+    self.logger.info("[DUT] Reset audio attributes.")
+    self.dut.bl4a.set_audio_attributes(
+        bl4a_api.AudioAttributes(
+            content_type=bl4a_api.AudioAttributes.ContentType.MUSIC,
+            usage=bl4a_api.AudioAttributes.Usage.MEDIA,
+        ),
+        handle_audio_focus=False,
+    )
 
     await super().async_teardown_test()
 
@@ -291,19 +307,26 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
     self.assertLen(records, 1)
     record = records[0]
     self.assertGreaterEqual(record.version, hfp.ProfileVersion.V1_6)
+    expected_features = self.dut.get_int_prop(
+        android_constants.Property.HFP_AG_FEATURES_MASK
+    )
+    if expected_features is None:
+      expected_features = (
+          hfp.AgSdpFeature.THREE_WAY_CALLING
+          | hfp.AgSdpFeature.EC_NR
+          | hfp.AgSdpFeature.VOICE_RECOGNITION_FUNCTION
+          | hfp.AgSdpFeature.IN_BAND_RING_TONE_CAPABILITY
+          | hfp.AgSdpFeature.WIDE_BAND_SPEECH
+      )
+    else:
+      expected_features &= _AG_SDP_FEATURE_MASK
     self.assertContainsSubset(
-        [
-            hfp.AgSdpFeature.THREE_WAY_CALLING,
-            hfp.AgSdpFeature.EC_NR,
-            hfp.AgSdpFeature.VOICE_RECOGNITION_FUNCTION,
-            hfp.AgSdpFeature.IN_BAND_RING_TONE_CAPABILITY,
-            hfp.AgSdpFeature.WIDE_BAND_SPEECH,
-        ],
+        hfp.AgSdpFeature(expected_features),
         record.supported_features,
     )
     if (
         self.dut.getprop(_PROPERTY_SWB_SUPPORTED) == "true"
-        or self.dut.getprop(android_constants.Property.SW_PATH_ENABLED)
+        or self.dut.getprop(android_constants.Property.HFP_SW_PATH_ENABLED)
         == "true"
     ):
       self.assertIn(
@@ -425,8 +448,22 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
           telecom_cb, _CallState.CONNECTING, _CallState.DIALING
       )
 
+      self.logger.info("[DUT] Answer call.")
+      call.answer()
+
+      await self._wait_for_call_state(telecom_cb, _CallState.ACTIVE)
+
       self.logger.info("[DUT] Set audio repeat mode to one.")
       self.dut.bt.audioSetRepeat(android_constants.RepeatMode.ONE)
+
+      self.logger.info("[DUT] Set audio attributes for voice communication.")
+      self.dut.bl4a.set_audio_attributes(
+          bl4a_api.AudioAttributes(
+              content_type=bl4a_api.AudioAttributes.ContentType.SPEECH,
+              usage=bl4a_api.AudioAttributes.Usage.VOICE_COMMUNICATION,
+          ),
+          handle_audio_focus=False,
+      )
 
       self.logger.info("[DUT] Start streaming.")
       self.dut.bt.audioPlaySine()
@@ -445,9 +482,7 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       self.assertEqual(ref_hfp_protocol.active_codec, preferred_codec)
 
       self.logger.info("[DUT] Start recording.")
-      recorder = await asyncio.to_thread(
-          lambda: self.dut.bl4a.start_audio_recording(_RECORDING_PATH)
-      )
+      recorder = await self.dut.bl4a.start_audio_recording(_RECORDING_PATH)
       self.test_case_context.push(recorder)
 
       ref_received_packets = list[hci.HCI_SynchronousDataPacket]()
@@ -492,6 +527,8 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
         "cat",
         f"/data/media/{self.dut.adb.current_user_id}/Recordings/record.wav",
     ])
+
+    self.assertTrue(sco_links.empty(), "More than one SCO link is created.")
 
     return rx_received_buffer, ref_received_packets
 
@@ -604,7 +641,9 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       return
 
     tx_dominant_frequency = audio.get_dominant_frequency(
-        ref_rx_received_buffer, format="sbc"
+        ref_rx_received_buffer,
+        format="sbc",
+        frame_rate=16000,
     )
     self.logger.info("[Tx] Dominant frequency: %.2f", tx_dominant_frequency)
     rx_dominant_frequency = audio.get_dominant_frequency(
@@ -629,7 +668,7 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
 
     if (
         self.dut.getprop(_PROPERTY_SWB_SUPPORTED) != "true"
-        and self.dut.getprop(android_constants.Property.SW_PATH_ENABLED)
+        and self.dut.getprop(android_constants.Property.HFP_SW_PATH_ENABLED)
         != "true"
     ):
       self.skipTest("LC3 SWB is not supported on DUT.")
@@ -951,6 +990,15 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       self.logger.info("[DUT] Set repeat mode to one.")
       self.dut.bt.audioSetRepeat(android_constants.RepeatMode.ONE)
 
+      self.logger.info("[DUT] Set audio attributes for voice communication.")
+      self.dut.bl4a.set_audio_attributes(
+          bl4a_api.AudioAttributes(
+              content_type=bl4a_api.AudioAttributes.ContentType.SPEECH,
+              usage=bl4a_api.AudioAttributes.Usage.VOICE_COMMUNICATION,
+          ),
+          handle_audio_focus=False,
+      )
+
       self.logger.info("[DUT] Play sine wave.")
       self.dut.bt.audioPlaySine()
 
@@ -1012,6 +1060,15 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
         ),
     ):
       await self.classic_connect_and_pair(connect_profiles=True)
+
+      self.logger.info("[DUT] Set audio attributes for voice communication.")
+      self.dut.bl4a.set_audio_attributes(
+          bl4a_api.AudioAttributes(
+              content_type=bl4a_api.AudioAttributes.ContentType.SPEECH,
+              usage=bl4a_api.AudioAttributes.Usage.VOICE_COMMUNICATION,
+          ),
+          handle_audio_focus=False,
+      )
 
       self.dut.bt.audioSetRepeat(android_constants.RepeatMode.ONE)
       self.dut.bt.audioPlaySine()
@@ -1283,7 +1340,7 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
 
     voice_command_callback = self.dut.bl4a.register_voice_command_callback()
     self.test_case_context.push(voice_command_callback)
-    activation_task: asyncio.Task | None = None
+    activation_task: asyncio.Task[None] | None = None
     if initiator == constants.TestRole.REF:
       self.logger.info("[REF] Start voice recognition.")
       # Android stack doesn't reply BVRA until
@@ -1321,7 +1378,7 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
               lambda: vr_state[0] == hfp.VoiceRecognitionState.ENABLE
           )
 
-    recorder = self.dut.bl4a.start_audio_recording(_RECORDING_PATH)
+    recorder = await self.dut.bl4a.start_audio_recording(_RECORDING_PATH)
     self.test_case_context.push(recorder)
 
     self.logger.info("[DUT] Wait for SCO connected.")
