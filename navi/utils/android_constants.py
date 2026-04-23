@@ -1,4 +1,4 @@
-#  Copyright 2025 Google LLC
+#  Copyright 2026 Google LLC
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -79,7 +79,10 @@ class Property(enum.StrEnum):
   )
   # HFP.
   SCO_MANAGED_BY_AUDIO = "bluetooth.sco.managed_by_audio"
-  SW_PATH_ENABLED = "bluetooth.hfp.software_datapath.enabled"
+  HFP_SW_PATH_ENABLED = "bluetooth.hfp.software_datapath.enabled"
+  HFP_AG_FEATURES_MASK = (  # HF features are actually AG features.
+      "bluetooth.hfp.hf_features.config"
+  )
   # AVRCP
   AVRCP_VERSION = "persist.bluetooth.avrcpversion"
 

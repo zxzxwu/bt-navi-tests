@@ -1,4 +1,4 @@
-#  Copyright 2025 Google LLC
+#  Copyright 2026 Google LLC
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -243,10 +243,13 @@ class AndroidCrownAdapter(CrownAdapter):
     if (
         self.ad.adb.shell(['getprop', 'persist.bluetooth.leaudio_sw_offload'])
         != 'false'
+        or self.ad.adb.shell(['getprop', 'persist.bluetooth.sw_offload'])
+        != 'false'
     ):
       self.ad.adb.shell(
           ['setprop', 'persist.bluetooth.leaudio_sw_offload', 'false']
       )
+      self.ad.adb.shell(['setprop', 'persist.bluetooth.sw_offload', 'false'])
       with contextlib.suppress(adb.Error):
         self.ad.adb.shell(['pkill -U bluetooth'])
         time.sleep(0.5)

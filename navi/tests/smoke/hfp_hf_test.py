@@ -1,4 +1,4 @@
-#  Copyright 2025 Google LLC
+#  Copyright 2026 Google LLC
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -66,24 +66,6 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
   async def async_setup_test(self) -> None:
     await super().async_setup_test()
     self.ref_hfp_protocols = asyncio.Queue[hfp.AgProtocol]()
-
-  async def _terminate_connection_from_ref(self) -> None:
-    if not (
-        dut_ref_acl := self.ref.device.find_connection_by_bd_addr(
-            hci.Address(self.dut.address)
-        )
-    ):
-      return
-
-    self.logger.info("[REF] Terminate connection.")
-    with self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER) as dut_cb:
-      await dut_ref_acl.disconnect()
-      await dut_cb.wait_for_event(
-          bl4a_api.AclDisconnected(
-              address=self.ref.address,
-              transport=android_constants.Transport.CLASSIC,
-          ),
-      )
 
   async def _wait_for_hfp_state(
       self, dut_cb: _Callback, state: _HfpState
@@ -172,7 +154,10 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
       6. Wait HFP disconnected on DUT.
     """
     await self.test_pair_and_connect()
-    await self._terminate_connection_from_ref()
+
+    await self.disconnect_with_check(
+        self.ref.address, android_constants.Transport.CLASSIC
+    )
 
     with self.dut.bl4a.register_callback(bl4a_api.Module.HFP_HF) as dut_cb:
 
@@ -196,7 +181,10 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
       6. Wait HFP disconnected on DUT.
     """
     await self.test_pair_and_connect()
-    await self._terminate_connection_from_ref()
+
+    await self.disconnect_with_check(
+        self.ref.address, android_constants.Transport.CLASSIC
+    )
 
     with self.dut.bl4a.register_callback(bl4a_api.Module.HFP_HF) as dut_cb:
       await self._connect_hfp_from_ref(hfp_ext.make_ag_configuration())
@@ -204,7 +192,11 @@ class HfpHfTest(navi_test_base.TwoDevicesTestBase):
       self.logger.info("[DUT] Wait for HFP connected.")
       await self._wait_for_hfp_state(dut_cb, _HfpState.CONNECTED)
 
-      await self._terminate_connection_from_ref()
+      await self.disconnect_with_check(
+          self.ref.address, android_constants.Transport.CLASSIC
+      )
+
+      self.logger.info("[DUT] Wait for HFP disconnected.")
       await self._wait_for_hfp_state(dut_cb, _HfpState.DISCONNECTED)
 
   @navi_test_base.parameterized(

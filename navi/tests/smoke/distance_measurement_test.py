@@ -1,4 +1,4 @@
-#  Copyright 2025 Google LLC
+#  Copyright 2026 Google LLC
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -337,6 +337,10 @@ class DistanceMeasurementTest(navi_test_base.TwoDevicesTestBase):
         transport=android_constants.Transport.LE,
         address_type=android_constants.AddressTypeStatus.RANDOM,
     )
+
+    # Setup connection and pairing.
+    await self.le_connect_and_pair(ref_address_type=hci.OwnAddressType.RANDOM)
+
     self.logger.info('[DUT] Start distance measurement')
     distance_measurement = self.dut.bl4a.start_distance_measurement(
         bl4a_api.DistanceMeasurementParameters(

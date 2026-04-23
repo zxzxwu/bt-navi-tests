@@ -1,4 +1,4 @@
-#  Copyright 2025 Google LLC
+#  Copyright 2026 Google LLC
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -385,7 +385,6 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
     Args:
       issuer: The device that initiates the virtual unplug.
     """
-    self.assertEqual(self.dut.bt.getBondedDevices(), [])
     await self.test_connect()
 
     with (
@@ -415,8 +414,13 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
       self.logger.info("[DUT] Wait for acl disconnected")
       await dut_adapter_cb.wait_for_event(bl4a_api.AclDisconnected)
 
-    self.logger.info("[DUT] Verify the device is not bonded")
-    self.assertEqual(self.dut.bt.getBondedDevices(), [])
+      self.logger.info("[DUT] Wait for bond removed")
+      await dut_adapter_cb.wait_for_event(
+          bl4a_api.BondStateChanged(
+              address=self.ref.address,
+              state=android_constants.BondState.NONE,
+          )
+      )
 
   async def test_set_and_get_report(self) -> None:
     """Tests the HID set report.

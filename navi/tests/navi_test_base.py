@@ -1,4 +1,4 @@
-#  Copyright 2025 Google LLC
+#  Copyright 2026 Google LLC
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -59,6 +59,7 @@ from navi.utils import logcat
 from navi.utils import matcher
 from navi.utils import retry as retry_lib
 from navi.utils import snippet_stub
+
 
 _NAVI_PARAMETERIZED = "_NAVI_PARAMETERIZED"
 _NAVI_REQUIRE_FLAG = "_NAVI_REQUIRE_FLAG"
@@ -238,6 +239,18 @@ class AndroidSnippetDeviceWrapper:
   def getprop(self, prop_name: str) -> str:
     """Gets a property of the device."""
     return self.adb.getprop(prop_name)
+
+  def get_int_prop(self, prop_name: str) -> int | None:
+    """Gets a property of the device."""
+    text = self.getprop(prop_name)
+    if text.isdigit():
+      return int(text)
+    elif text.startswith("0x"):
+      return int(text, 16)
+    elif not text:  # Empty string
+      return None
+    else:
+      raise ValueError(f"Invalid property value: {text}")
 
   def setprop(self, prop_name: str, prop_value: str) -> None:
     """Sets a property of the device."""
@@ -1038,6 +1051,18 @@ class AndroidBumbleTestBase(BaseTestBase):
   async def async_setup_test(self) -> None:
     await super().async_setup_test()
 
+    # Check if snippet is broken.
+    try:
+      self.dut.bt.ping()
+    except (BrokenPipeError, mobly.snippet.errors.Error) as e:
+      if self.dut.device.is_adb_detectable():
+        self.logger.exception("Snippet is broken, reloading")
+        self.dut.reload_snippet()
+      else:
+        raise signals.TestAbortAll(
+            "DUT is disconnected, cannot continue the test."
+        ) from e
+
     # Bumble logger.
     self.test_case_log_handler = logging.FileHandler(
         pathlib.Path(self.current_test_info.output_path, "test_log.DEBUG")
@@ -1051,15 +1076,13 @@ class AndroidBumbleTestBase(BaseTestBase):
     self.test_case_log_handler.setLevel(logging.DEBUG)
     logging.getLogger().addHandler(self.test_case_log_handler)
 
-    # Enable required flags.
+    # Check required flags.
     for flag_name in getattr(self.current_test_method, _NAVI_REQUIRE_FLAG, []):
       flag = self.dut.get_flag(flag_name)
       if not flag:
         self.skipTest(f"Flag {flag_name} is not present.")
       if not flag.enabled:
-        if not flag.writable:
-          self.skipTest(f"Flag {flag_name} is not writable.")
-        self.dut.set_flag(flag_name, value=True)
+        self.skipTest(f"Flag {flag_name} is not enabled.")
 
     # Make sure Bluetooth is enabled before factory reset.
     self.assertTrue(self.dut.bt.enable())
@@ -1086,16 +1109,6 @@ class AndroidBumbleTestBase(BaseTestBase):
 
   @override
   async def async_teardown_test(self) -> None:
-    try:
-      self.dut.bt.ping()
-    except (BrokenPipeError, mobly.snippet.errors.Error) as e:
-      if self.dut.device.is_adb_detectable():
-        self.logger.exception("Snippet is broken, reloading")
-        self.dut.reload_snippet()
-      else:
-        raise signals.TestAbortAll(
-            "DUT is disconnected, cannot continue the test."
-        ) from e
     # Collect logcat.
     self.dut.device.services.create_output_excerpts_all(self.current_test_info)
     # Close test case log handler.
@@ -1103,10 +1116,6 @@ class AndroidBumbleTestBase(BaseTestBase):
       self.test_case_log_handler.close()
       logging.getLogger().removeHandler(self.test_case_log_handler)
       self.test_case_log_handler = None
-
-    # Reset flags.
-    for flag_name in getattr(self.current_test_method, _NAVI_REQUIRE_FLAG, []):
-      self.dut.set_flag(flag_name, value=None)
 
     await super().async_teardown_test()
 
@@ -1243,7 +1252,7 @@ class AndroidBumbleTestBase(BaseTestBase):
             timeout=_SETUP_TIMEOUT_SECONDS,
         )
         # Trigger profile connections.
-        self.dut.bt.connect(ref.address)
+        await asyncio.to_thread(self.dut.bt.connect, ref.address)
       return ref_dut_acl
 
   @retry_lib.retry_on_exception(initial_delay_sec=1, num_retries=3)
@@ -1253,6 +1262,7 @@ class AndroidBumbleTestBase(BaseTestBase):
       ref: crown.CrownDevice | None = None,
       direction: constants.Direction = constants.Direction.OUTGOING,
       connect_profiles: bool = False,
+      delegate: pairing.PairingDelegate | None = None,
   ) -> None:
     """Connects and creates bond from DUT over LE.
 
@@ -1267,12 +1277,18 @@ class AndroidBumbleTestBase(BaseTestBase):
       direction: The direction of the pairing.
       connect_profiles: Whether to connect profiles after pairing. This may
         fails if REF has no known service UUIDs.
+      delegate: The pairing delegate to use for pairing.
 
     Returns:
       None.
     """
     if ref is None:
       ref = self._refs[0]
+
+    if delegate is None:
+      delegate = pairing.PairingDelegate(
+          io_capability=pairing.PairingDelegate.IoCapability.DISPLAY_OUTPUT_AND_YES_NO_INPUT,
+      )
 
     match ref_address_type:
       case bumble.hci.OwnAddressType.PUBLIC:
@@ -1306,9 +1322,7 @@ class AndroidBumbleTestBase(BaseTestBase):
       # io capability.
       ref.device.pairing_config_factory = lambda _: pairing.PairingConfig(
           identity_address_type=identity_address_type,
-          delegate=pairing.PairingDelegate(
-              io_capability=pairing.PairingDelegate.IoCapability.DISPLAY_OUTPUT_AND_YES_NO_INPUT
-          ),
+          delegate=delegate,
       )
 
       pair_task: asyncio.Task[None] | None = None
@@ -1397,7 +1411,7 @@ class AndroidBumbleTestBase(BaseTestBase):
             timeout=_SETUP_TIMEOUT_SECONDS,
         )
         # Trigger profile connections.
-        self.dut.bt.connect(ref_addr)
+        await asyncio.to_thread(self.dut.bt.connect, ref_addr)
 
   async def disconnect_with_check(
       self,
@@ -1475,6 +1489,41 @@ class AndroidBumbleTestBase(BaseTestBase):
     self.test_class_context.callback(
         lambda: self.dut.setprop(prop, current_value)
     )
+
+  def setflag_for_class_context(self, flag_name: str, tmp_value: bool) -> bool:
+    """Sets a flag and registers a callback to revert it.
+
+    If the flag is already set to the tmp_value, do nothing.
+
+    Args:
+      flag_name: The name of the flag to set.
+      tmp_value: The value to set the flag to.
+
+    Returns:
+      True if the flag is set successfully, False otherwise.
+    """
+    flag = self.dut.get_flag(flag_name)
+    if not flag:
+      self.logger.error("Flag %s is not present.", flag_name)
+      return False
+    if flag.enabled == tmp_value:
+      self.logger.info(
+          "Flag %s is already %s.",
+          flag_name,
+          "enabled" if tmp_value else "disabled",
+      )
+      return True
+    if not flag.writable:
+      self.logger.error("Flag %s is not writable.", flag_name)
+      return False
+
+    self.logger.info("[DUT] Setting %s to %s", flag_name, tmp_value)
+
+    self.dut.set_flag(flag_name, value=tmp_value)
+    self.test_class_context.callback(
+        lambda: self.dut.set_flag(flag_name, value=flag.enabled)
+    )
+    return True
 
 
 class OneDeviceTestBase(AndroidBumbleTestBase):

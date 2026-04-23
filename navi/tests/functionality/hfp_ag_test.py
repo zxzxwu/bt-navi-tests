@@ -1,4 +1,4 @@
-#  Copyright 2025 Google LLC
+#  Copyright 2026 Google LLC
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -47,7 +47,7 @@ class NoReplyCodecNegotiationHfProtocol(hfp_ext.HfProtocol):
     pass
 
 
-class HfpAgTest(navi_test_base.TwoDevicesTestBase):
+class HfpAgVentiTest(navi_test_base.TwoDevicesTestBase):
 
   @override
   async def async_teardown_test(self) -> None:

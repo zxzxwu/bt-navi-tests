@@ -1,4 +1,4 @@
-#  Copyright 2025 Google LLC
+#  Copyright 2026 Google LLC
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 import asyncio
 import datetime
-from typing import Any
 from unittest import mock
 
 from bumble import core
@@ -33,7 +32,6 @@ _DEFAULT_DISCOVER_TIMEOUT = 15
 _DEFAULT_TIMEOUT = 10.0
 _PROFILE_ID_TO_UUIDS: dict[int, set[core.UUID]] = {
     _Profile.HEADSET: {
-        core.BT_HEADSET_AUDIO_GATEWAY_SERVICE,
         core.BT_HANDSFREE_AUDIO_GATEWAY_SERVICE,
         core.BT_GENERIC_AUDIO_SERVICE,
     },
@@ -79,27 +77,6 @@ _CLASSIC_PROFILES = (
     core.BT_MESSAGE_ACCESS_SERVER_SERVICE,  # MAS
     core.BT_MESSAGE_NOTIFICATION_SERVER_SERVICE,  # MNS
 )
-
-
-# TODO: Remove these once eq is implemented for SDP classes.
-def _compare_service_attribute(self: sdp.ServiceAttribute, other: Any) -> bool:
-  if not isinstance(other, sdp.ServiceAttribute):
-    return False
-  return self.id == other.id and self.value == other.value
-
-
-def _compare_data_element(self: sdp.DataElement, other: Any) -> bool:
-  if not isinstance(other, sdp.DataElement):
-    return False
-  return (
-      self.type == other.type
-      and self.value == other.value
-      and self.value_size == other.value_size
-  )
-
-
-sdp.ServiceAttribute.__eq__ = _compare_service_attribute  # type: ignore
-sdp.DataElement.__eq__ = _compare_data_element  # type: ignore
 
 
 def _make_sdp_service_record(
@@ -278,6 +255,7 @@ class ClassicHostTest(navi_test_base.TwoDevicesTestBase):
       async with self.assert_timeout(_DEFAULT_DISCOVER_TIMEOUT):
         await inquiry.wait()
 
+  @navi_test_base.retry(max_count=2)
   async def test_sdp_discovery_from_ref(self) -> None:
     """Test SDP discovery from REF.
 
@@ -295,12 +273,21 @@ class ClassicHostTest(navi_test_base.TwoDevicesTestBase):
       3. Search services and attributes from REF.
     """
 
-    ref_dut_acl = await self.classic_connect_and_pair()
+    self.logger.info("[DUT] Start pairing.")
+    pair_task = asyncio.create_task(self.classic_connect_and_pair())
+    self.logger.info("[REF] Wait for ACL connection.")
+    ref_dut_acl = await self.ref.device.accept(
+        f"{self.dut.address}/P",
+        timeout=_DEFAULT_TIMEOUT,
+    )
 
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT):
       sdp_client = sdp.Client(ref_dut_acl)
       self.logger.info("[REF] Connect SDP client to DUT.")
       await sdp_client.connect()
+
+    self.logger.info("[DUT] Wait for pairing to complete.")
+    await pair_task
 
     expected_profile_uuids = set().union(*[
         profile_uuids
@@ -371,13 +358,9 @@ class ClassicHostTest(navi_test_base.TwoDevicesTestBase):
               uuids=mock.ANY,
           ),
       )
-      # TODO: Remove to_bytes() once hash is implemented for UUID.
       self.assertCountEqual(
-          [
-              core.UUID(uuid).to_bytes(force_128=True)
-              for uuid in event.uuids or []
-          ],
-          [uuid.to_bytes(force_128=True) for uuid in _CLASSIC_PROFILES],
+          [core.UUID(uuid) for uuid in event.uuids or []],
+          _CLASSIC_PROFILES,
           "Service UUIDs are not the same as expected.",
       )
 

@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 The Android Open Source Project
+ * Copyright 2026 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothQualityReport
+import android.bluetooth.BondStatus
 import android.bluetooth.OobData
 import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
@@ -252,6 +253,7 @@ class BluetoothAdapterSnippet : Snippet {
             BluetoothDevice.ACTION_ENCRYPTION_CHANGE ->
               postSnippetEvent(callbackId, SnippetConstants.ENCRYPTION_CHANGE) {
                 putString(SnippetConstants.FIELD_DEVICE, device?.address)
+                putInt(SnippetConstants.FIELD_TRANSPORT, transport)
               }
             BluetoothDevice.ACTION_KEY_MISSING ->
               postSnippetEvent(callbackId, SnippetConstants.KEY_MISSING) {
@@ -289,6 +291,11 @@ class BluetoothAdapterSnippet : Snippet {
   /** Get bond state of device [address]. */
   @Rpc(description = "Get bond state of device")
   fun getBondState(address: String): Int = bluetoothAdapter.getRemoteDevice(address).bondState
+
+  /** Get identity address of device [address]. */
+  @Rpc(description = "Get identity address of remote device")
+  fun getIdentityAddress(address: String): String? =
+    bluetoothAdapter.getRemoteDevice(address).identityAddress
 
   /** Returns local Bluetooth Public Address. */
   @Rpc(description = "Get local Bluetooth public address")
@@ -715,6 +722,12 @@ class BluetoothAdapterSnippet : Snippet {
   /** Returns the supported profiles. */
   @Rpc(description = "Get supported profiles")
   fun getSupportedProfiles(): List<Int> = bluetoothAdapter.supportedProfiles
+
+  /** Checks if a device is bonded on a specific transport. Return the bond status. */
+  @Rpc(description = "Check if a device is bonded on a specific transport")
+  fun getBondStatus(address: String, transport: Int): BondStatus? {
+    return bluetoothAdapter.getRemoteDevice(address).getBondStatus(transport)
+  }
 
   companion object {
     const val TAG = "BluetoothAdapterSnippet"

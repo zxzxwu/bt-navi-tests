@@ -1,4 +1,4 @@
-#  Copyright 2025 Google LLC
+#  Copyright 2026 Google LLC
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 import dataclasses
 import decimal
 
@@ -23,6 +23,7 @@ from bumble import a2dp
 from bumble import avc
 from bumble import avdtp
 from bumble import avrcp
+from bumble import core
 from bumble import device
 from mobly import test_runner
 from mobly import signals
@@ -134,6 +135,122 @@ class A2dpSinkTest(navi_test_base.TwoDevicesTestBase):
     avrcp_protocol_starts: asyncio.Queue[None]
     browsing_target_queue: asyncio.Queue[avrcp_ext.BrowsingTarget]
 
+  def _capabilities_support_codec(
+      self,
+      capabilities: Iterable[avdtp.ServiceCapabilities],
+      codec: a2dp_ext.A2dpCodec,
+  ) -> bool:
+    """Checks if the given capabilities support the codec."""
+    for cap in capabilities:
+      if not isinstance(cap, avdtp.MediaCodecCapabilities):
+        continue
+      if cap.media_codec_type != codec.codec_type:
+        continue
+      # If standard codec, type match is enough
+      if codec.codec_type != a2dp.CodecType.NON_A2DP:
+        return True
+      # If vendor codec, check vendor/codec ID
+      info = cap.media_codec_information
+      if (
+          isinstance(info, a2dp.VendorSpecificMediaCodecInformation)
+          and info.vendor_id == codec.vendor_id
+          and info.codec_id == codec.codec_id
+      ):
+        return True
+    return False
+
+  async def _reconnect_from_ref_to_dut(
+      self,
+      ref_a2dp_source_device: SourceDevice,
+      codec: a2dp_ext.A2dpCodec = a2dp_ext.A2dpCodec.SBC,
+  ) -> None:
+    """Actively initiates AVDTP and AVRCP connection from REF."""
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      self.logger.info("[REF] Connecting back to DUT.")
+      ref_acl = await self.ref.device.connect(
+          self.dut.address,
+          core.BT_BR_EDR_TRANSPORT,
+          timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
+      )
+      await ref_acl.authenticate()
+      await ref_acl.encrypt()
+
+      self.logger.info("[REF] Initiating AVDTP connection.")
+      avdtp_protocol = await avdtp.Protocol.connect(ref_acl)
+
+      local_source = avdtp_protocol.add_source(
+          codec.get_default_capabilities(),
+          codec.get_media_packet_pump(avdtp_protocol.l2cap_channel.peer_mtu),
+      )
+
+      self.logger.info("[REF] Discover remote endpoints (fast)")
+      discover_response = await avdtp_protocol.send_command(
+          avdtp.Discover_Command()
+      )
+
+      # We don't retrieve capabilities for all SEPs. Instead, we proceed with
+      # SetConfiguration immediately after finding the SEP for the target codec.
+      # This is because the phone, as an A2DP sink, supports up to 10 codec
+      # items, and AOSP imposes a 2-second timeout for AVDTP signaling channel
+      # setup. Retrieving capabilities for all items would exceed this timeout
+      # and cause connection failure.
+
+      # TODO: Get capabilities for all SEPs if b/495367526 fixed.
+      for endpoint_entry in discover_response.endpoints:
+        if endpoint_entry.tsep != avdtp.AVDTP_TSEP_SNK:
+          continue
+
+        self.logger.info(
+            "[REF] Found SNK endpoint %d, fetching capabilities",
+            endpoint_entry.seid,
+        )
+        get_cap_response = await avdtp_protocol.get_capabilities(
+            endpoint_entry.seid
+        )
+
+        if self._capabilities_support_codec(
+            get_cap_response.capabilities, codec
+        ):
+          target_endpoint_seid = endpoint_entry.seid
+          target_capabilities = get_cap_response.capabilities
+          break
+      else:
+        self.fail(f"No remote SNK endpoint with {codec.name} found")
+
+      target_endpoint = avdtp.StreamEndPointProxy(
+          avdtp_protocol, target_endpoint_seid
+      )
+
+      self.logger.info("[REF] Create and configure stream")
+      if not (
+          remote_caps := next(
+              (
+                  cap
+                  for cap in target_capabilities
+                  if isinstance(cap, avdtp.MediaCodecCapabilities)
+                  and cap.media_codec_type == codec.codec_type
+              ),
+              None,
+          )
+      ):
+        self.fail(f"No remote media codec capabilities with {codec.name} found")
+
+      configuration = a2dp_ext.select_configuration(codec, remote_caps)
+
+      self.logger.info("[REF] Set configuration")
+      await target_endpoint.set_configuration(local_source.seid, configuration)
+
+      local_source.configuration = configuration
+      stream = avdtp.Stream(avdtp_protocol, local_source, target_endpoint)
+      avdtp_protocol.streams[target_endpoint_seid] = stream
+      stream.change_state(avdtp.State.CONFIGURED)
+
+      self.logger.info("[REF] Open stream")
+      await stream.open()
+
+      self.logger.info("[REF] Connect AVRCP.")
+      await ref_a2dp_source_device.avrcp_protocol.connect(ref_acl)
+
   def _setup_a2dp_source_device(
       self,
       bumble_device: device.Device,
@@ -201,6 +318,58 @@ class A2dpSinkTest(navi_test_base.TwoDevicesTestBase):
       await ref_a2dp_source_device.avrcp_protocol_starts.get()
 
     self.logger.info("[DUT] Waiting for A2DP connection state changed.")
+    await dut_a2dp_sink_callback.wait_for_event(
+        bl4a_api.ProfileConnectionStateChanged(
+            address=self.ref.address,
+            state=android_constants.ConnectionState.CONNECTED,
+        )
+    )
+
+  async def test_paired_connect_incoming(self) -> None:
+    """Tests A2DP and AVRCP connection actively initiated by REF.
+
+    Test steps:
+      1. Connect and pair DUT to REF.
+      2. Verify DUT is connected to REF A2DP Source and AVRCP Target.
+      3. Disconnect DUT and REF from DUT.
+      4. REF actively initiates AVDTP and AVRCP connection.
+    """
+    ref_a2dp_source_device = self._setup_a2dp_source_device(self.ref.device)
+
+    dut_a2dp_sink_callback = self.dut.bl4a.register_callback(
+        bl4a_api.Module.A2DP_SINK
+    )
+    self.test_case_context.push(dut_a2dp_sink_callback)
+
+    self.logger.info("[DUT] Connect and pair REF.")
+    await self.classic_connect_and_pair(connect_profiles=True)
+
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      self.logger.info("[REF] Wait for AVDTP connection")
+      avdtp_protocol = await ref_a2dp_source_device.avdtp_protocol_queue.get()
+      self.logger.info("[REF] Discover remote endpoints")
+      await avdtp_protocol.discover_remote_endpoints()
+      self.logger.info("[REF] Wait for AVRCP connection")
+      await ref_a2dp_source_device.avrcp_protocol_starts.get()
+
+    self.logger.info("[DUT] Wait for A2DP connected.")
+    await dut_a2dp_sink_callback.wait_for_event(
+        bl4a_api.ProfileConnectionStateChanged(
+            address=self.ref.address,
+            state=android_constants.ConnectionState.CONNECTED,
+        )
+    )
+
+    self.logger.info("[DUT] Disconnect with check.")
+    await self.disconnect_with_check(
+        self.ref.address, android_constants.Transport.CLASSIC
+    )
+
+    await self._reconnect_from_ref_to_dut(
+        ref_a2dp_source_device, codec=a2dp_ext.A2dpCodec.SBC
+    )
+
+    self.logger.info("[DUT] Wait for A2DP connected.")
     await dut_a2dp_sink_callback.wait_for_event(
         bl4a_api.ProfileConnectionStateChanged(
             address=self.ref.address,
@@ -980,6 +1149,67 @@ class A2dpSinkTest(navi_test_base.TwoDevicesTestBase):
                 == ref_shuffle_mode  # pylint: disable=cell-var-from-loop
             ),
         )
+
+  async def test_stream_suspend_and_resume(self) -> None:
+    """Tests handling of AVDTP Suspend and Start (Resume) commands during an active stream without dropping the connection.
+
+    Test steps:
+      1. Establish connection and REF starts A2DP stream.
+      2. REF sends AVDTP Suspend command.
+      3. Verify audio stream is suspended smoothly on DUT (no disconnection).
+      4. REF sends AVDTP Start command.
+      5. Verify DUT resumes audio playback successfully.
+    """
+
+    ref_a2dp_source_device = self._setup_a2dp_source_device(
+        self.ref.device, codecs=[a2dp_ext.A2dpCodec.SBC]
+    )
+
+    self.logger.info("[DUT] Connect and pair REF.")
+    await self.classic_connect_and_pair(connect_profiles=True)
+
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      self.logger.info("[REF] Wait for AVDTP connection")
+      avdtp_protocol = await ref_a2dp_source_device.avdtp_protocol_queue.get()
+      self.logger.info("[REF] Discover remote endpoints")
+      await avdtp_protocol.discover_remote_endpoints()
+
+    sources = a2dp_ext.find_local_endpoints_by_codec(
+        avdtp_protocol,
+        a2dp.CodecType.SBC,
+        avdtp.LocalSource,
+        vendor_id=0,
+        codec_id=0,
+    )
+    if not sources:
+      self.fail("No A2DP local SBC source found")
+
+    if not (stream := sources[0].stream):
+      self.fail("REF doesn't create a stream")
+
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      self.logger.info("[REF] Start stream")
+      await stream.start()
+
+    await asyncio.sleep(_DEFAULT_STREAM_DURATION_SECONDS)
+
+    self.assertEqual(stream.state, avdtp.State.STREAMING)
+
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      self.logger.info("[REF] Suspend stream")
+      await stream.stop()
+
+    await asyncio.sleep(_DEFAULT_STREAM_DURATION_SECONDS)
+
+    self.assertEqual(stream.state, avdtp.State.OPEN)
+
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      self.logger.info("[REF] Resume stream")
+      await stream.start()
+
+    await asyncio.sleep(_DEFAULT_STREAM_DURATION_SECONDS)
+
+    self.assertEqual(stream.state, avdtp.State.STREAMING)
 
 
 if __name__ == "__main__":

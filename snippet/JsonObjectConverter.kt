@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 The Android Open Source Project
+ * Copyright 2026 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -548,6 +548,12 @@ class JsonObjectConverter : SnippetObjectConverter {
     }
     if (parameter is BluetoothCodecConfig) {
       return parameter.toJson()
+    }
+    if (Build.VERSION.SDK_INT >= 37 && parameter is android.bluetooth.BondStatus) {
+      return JSONObject().apply {
+        put(SnippetConstants.PAIRING_ALGORITHM, parameter.pairingAlgorithm)
+        put(SnippetConstants.PAIRING_VARIANT, parameter.pairingVariant)
+      }
     }
     return null
   }

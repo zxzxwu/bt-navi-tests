@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 The Android Open Source Project
+ * Copyright 2026 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -123,6 +123,12 @@ class BluetoothA2dpSnippet : Snippet {
   @Rpc(description = "Set A2DP codec config of device [address] to [codecConfig]")
   fun setA2dpCodecConfig(address: String, config: BluetoothCodecConfig) {
     proxy.setCodecConfigPreference(bluetoothAdapter.getRemoteDevice(address), config)
+  }
+
+  /* Set A2DP optional codecs enabled status of device [address] to [enabled]. */
+  @Rpc(description = "Set A2DP optional codecs enabled status of device [address] to [enabled]")
+  fun setA2dpOptionalCodecsEnabled(address: String, enabled: Int) {
+    proxy.setOptionalCodecsEnabled(bluetoothAdapter.getRemoteDevice(address), enabled)
   }
 
   companion object {

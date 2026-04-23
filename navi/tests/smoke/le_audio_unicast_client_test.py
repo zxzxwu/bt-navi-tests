@@ -1,4 +1,4 @@
-#  Copyright 2025 Google LLC
+#  Copyright 2026 Google LLC
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -441,12 +441,10 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
     self.logger.info("[DUT] Start communication audio streaming")
     await asyncio.to_thread(self.dut.bt.audioPlaySine, communication_player)
     self.logger.info("[DUT] Start audio recording")
-    recorder = await asyncio.to_thread(
-        lambda: self.dut.bl4a.start_audio_recording(
-            _RECORDING_PATH,
-            source=bl4a_api.AudioRecorder.Source.VOICE_PERFORMANCE,
-            preferred_device_address=self.ref.random_address,
-        )
+    recorder = await self.dut.bl4a.start_audio_recording(
+        _RECORDING_PATH,
+        source=bl4a_api.AudioRecorder.Source.VOICE_PERFORMANCE,
+        preferred_device_address=self.ref.random_address,
     )
     self.test_case_context.push(recorder)
 
@@ -549,11 +547,9 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
         )
 
       self.logger.info("[DUT] Start audio recording")
-      recorder = await asyncio.to_thread(
-          lambda: self.dut.bl4a.start_audio_recording(
-              _RECORDING_PATH,
-              source=bl4a_api.AudioRecorder.Source.VOICE_COMMUNICATION,
-          )
+      recorder = await self.dut.bl4a.start_audio_recording(
+          _RECORDING_PATH,
+          source=bl4a_api.AudioRecorder.Source.VOICE_COMMUNICATION,
       )
       self.test_case_context.push(recorder)
       async with self.assert_not_timeout(
@@ -652,11 +648,9 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
       # Start audio streaming from DUT.
       self.dut.bt.audioSetRepeat(android_constants.RepeatMode.ONE)
       self.dut.bt.audioPlaySine()
-      recorder = await asyncio.to_thread(
-          lambda: self.dut.bl4a.start_audio_recording(
-              _RECORDING_PATH,
-              source=bl4a_api.AudioRecorder.Source.VOICE_COMMUNICATION,
-          )
+      recorder = await self.dut.bl4a.start_audio_recording(
+          _RECORDING_PATH,
+          source=bl4a_api.AudioRecorder.Source.VOICE_COMMUNICATION,
       )
       stack.enter_context(recorder)
 
@@ -766,8 +760,12 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
         lambda: self.ref_vcs.volume_setting,
     )
     ref_expected_volume = decimal.Decimal(
-        self.dut.bt.getVolume(_StreamType.MUSIC)
-        / self.dut.bt.getMaxVolume(_StreamType.MUSIC)
+        await asyncio.to_thread(
+            lambda: self.dut.bt.getVolume(_StreamType.MUSIC)
+        )
+        / await asyncio.to_thread(
+            lambda: self.dut.bt.getMaxVolume(_StreamType.MUSIC)
+        )
         * vcs.MAX_VOLUME
     ).to_integral_exact(rounding=decimal.ROUND_HALF_UP)
     async with self.assert_not_timeout(
@@ -790,10 +788,15 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
     if not self.dut_vcp_enabled:
       self.skipTest("VCP is not enabled on DUT")
 
-    dut_max_volume = self.dut.bt.getMaxVolume(_StreamType.MUSIC)
-    dut_expected_volume = (self.dut.bt.getVolume(_StreamType.MUSIC) + 1) % (
-        dut_max_volume + 1
+    dut_max_volume = await asyncio.to_thread(
+        lambda: self.dut.bt.getMaxVolume(_StreamType.MUSIC)
     )
+    dut_expected_volume = (
+        await asyncio.to_thread(
+            lambda: self.dut.bt.getVolume(_StreamType.MUSIC)
+        )
+        + 1
+    ) % (dut_max_volume + 1)
     ref_expected_volume = int(
         decimal.Decimal(
             dut_expected_volume / dut_max_volume * vcs.MAX_VOLUME
@@ -814,7 +817,11 @@ class LeAudioUnicastClientTest(navi_test_base.TwoDevicesTestBase):
       )
       if issuer == _TestRole.DUT:
         self.logger.info("[DUT] Set volume to %d", dut_expected_volume)
-        self.dut.bt.setVolume(_StreamType.MUSIC, dut_expected_volume)
+        await asyncio.to_thread(
+            lambda: self.dut.bt.setVolume(
+                _StreamType.MUSIC, dut_expected_volume
+            )
+        )
         async with self.assert_not_timeout(
             _DEFAULT_STEP_TIMEOUT_SECONDS,
             msg="[REF] Wait for volume to be set",

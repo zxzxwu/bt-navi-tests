@@ -1388,3 +1388,17 @@ constants {
   name: "FIELD_CHILDREN"
   string_value: "children"
 }
+
+# ============================ #
+# BondStatus   #
+# ============================ #
+
+constants {
+  name: "PAIRING_ALGORITHM"
+  string_value: "pairing_algorithm"
+}
+
+constants {
+  name: "PAIRING_VARIANT"
+  string_value: "pairing_variant"
+}

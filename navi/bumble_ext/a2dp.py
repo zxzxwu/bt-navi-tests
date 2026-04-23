@@ -1,4 +1,4 @@
-#  Copyright 2025 Google LLC
+#  Copyright 2026 Google LLC
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -81,6 +81,18 @@ class AptxCodecInformation:
         self.sample_rate | self.channel_mode,
     )
 
+  @classmethod
+  def from_vendor_info(
+      cls, info: a2dp.VendorSpecificMediaCodecInformation
+  ) -> Self:
+    if info.vendor_id != cls.VENDOR_ID:
+      raise ValueError(f'Invalid vendor ID: {info.vendor_id}')
+    if info.codec_id != cls.CODEC_ID:
+      raise ValueError(f'Invalid codec ID: {info.codec_id}')
+    sample_rate = info.value[0] & 0xF0
+    channel_mode = info.value[0] & 0x0F
+    return cls(AptxSamplingRate(sample_rate), AptxChannelMode(channel_mode))
+
 
 @dataclasses.dataclass(frozen=True)
 class AptxHdCodecInformation:
@@ -101,6 +113,18 @@ class AptxHdCodecInformation:
         bytes(4),  # RFU
     )
 
+  @classmethod
+  def from_vendor_info(
+      cls, info: a2dp.VendorSpecificMediaCodecInformation
+  ) -> Self:
+    if info.vendor_id != cls.VENDOR_ID:
+      raise ValueError(f'Invalid vendor ID: {info.vendor_id}')
+    if info.codec_id != cls.CODEC_ID:
+      raise ValueError(f'Invalid codec ID: {info.codec_id}')
+    sample_rate = info.value[0] & 0xF0
+    channel_mode = info.value[0] & 0x0F
+    return cls(AptxSamplingRate(sample_rate), AptxChannelMode(channel_mode))
+
 
 @dataclasses.dataclass(frozen=True)
 class LdacCodecInformation:
@@ -120,6 +144,16 @@ class LdacCodecInformation:
         self.sample_rate,
         self.channel_mode,
     )
+
+  @classmethod
+  def from_vendor_info(
+      cls, info: a2dp.VendorSpecificMediaCodecInformation
+  ) -> Self:
+    if info.vendor_id != cls.VENDOR_ID:
+      raise ValueError(f'Invalid vendor ID: {info.vendor_id}')
+    if info.codec_id != cls.CODEC_ID:
+      raise ValueError(f'Invalid codec ID: {info.codec_id}')
+    return cls(LdacSamplingRate(info.value[0]), LdacChannelMode(info.value[1]))
 
 
 @enum.unique
@@ -295,6 +329,278 @@ class A2dpCodec(constants.ShortReprEnum):
         A2dpCodec.LDAC: a2dp.CodecType.NON_A2DP,
         A2dpCodec.OPUS: a2dp.CodecType.NON_A2DP,
     }[self]
+
+
+def select_configuration(
+    codec: A2dpCodec,
+    remote_capabilities: avdtp.MediaCodecCapabilities,
+) -> list[avdtp.ServiceCapabilities]:
+  """Selects the mutually supported codec configuration."""
+  local_capabilities = codec.get_default_capabilities()
+  local_info = local_capabilities.media_codec_information
+  remote_info = remote_capabilities.media_codec_information
+
+  _F = TypeVar('_F', bound=enum.IntFlag)
+
+  def select_highest_flag(flags: int, priority_list: Sequence[_F]) -> _F:
+    for flag in priority_list:
+      if flags & flag:
+        return flag
+    raise ValueError(f'No common capabilities found in {flags}')
+
+  match local_info:
+    case a2dp.AacMediaCodecInformation():
+      if not isinstance(remote_info, a2dp.AacMediaCodecInformation):
+        raise TypeError('Incompatible remote capabilities for AAC')
+      return [
+          avdtp.ServiceCapabilities(
+              service_category=avdtp.AVDTP_MEDIA_TRANSPORT_SERVICE_CATEGORY
+          ),
+          avdtp.MediaCodecCapabilities(
+              media_type=avdtp.MediaType.AUDIO,
+              media_codec_type=a2dp.CodecType.MPEG_2_4_AAC,
+              media_codec_information=a2dp.AacMediaCodecInformation(
+                  object_type=select_highest_flag(
+                      local_info.object_type & remote_info.object_type,
+                      [
+                          a2dp.AacMediaCodecInformation.ObjectType.MPEG_2_AAC_LC,
+                          a2dp.AacMediaCodecInformation.ObjectType.MPEG_4_AAC_LC,
+                          a2dp.AacMediaCodecInformation.ObjectType.MPEG_4_AAC_LTP,
+                          a2dp.AacMediaCodecInformation.ObjectType.MPEG_4_AAC_SCALABLE,
+                      ],
+                  ),
+                  sampling_frequency=select_highest_flag(
+                      local_info.sampling_frequency
+                      & remote_info.sampling_frequency,
+                      [
+                          a2dp.AacMediaCodecInformation.SamplingFrequency.SF_44100,
+                          a2dp.AacMediaCodecInformation.SamplingFrequency.SF_48000,
+                          a2dp.AacMediaCodecInformation.SamplingFrequency.SF_88200,
+                          a2dp.AacMediaCodecInformation.SamplingFrequency.SF_96000,
+                          a2dp.AacMediaCodecInformation.SamplingFrequency.SF_32000,
+                          a2dp.AacMediaCodecInformation.SamplingFrequency.SF_24000,
+                          a2dp.AacMediaCodecInformation.SamplingFrequency.SF_22050,
+                          a2dp.AacMediaCodecInformation.SamplingFrequency.SF_16000,
+                          a2dp.AacMediaCodecInformation.SamplingFrequency.SF_12000,
+                          a2dp.AacMediaCodecInformation.SamplingFrequency.SF_11025,
+                          a2dp.AacMediaCodecInformation.SamplingFrequency.SF_8000,
+                      ],
+                  ),
+                  channels=select_highest_flag(
+                      local_info.channels & remote_info.channels,
+                      [
+                          a2dp.AacMediaCodecInformation.Channels.STEREO,
+                          a2dp.AacMediaCodecInformation.Channels.MONO,
+                      ],
+                  ),
+                  vbr=local_info.vbr & remote_info.vbr,
+                  bitrate=min(local_info.bitrate, remote_info.bitrate),
+              ),
+          ),
+      ]
+    case a2dp.SbcMediaCodecInformation():
+      if not isinstance(remote_info, a2dp.SbcMediaCodecInformation):
+        raise TypeError('Incompatible remote capabilities for SBC')
+      return [
+          avdtp.ServiceCapabilities(
+              service_category=avdtp.AVDTP_MEDIA_TRANSPORT_SERVICE_CATEGORY
+          ),
+          avdtp.MediaCodecCapabilities(
+              media_type=avdtp.MediaType.AUDIO,
+              media_codec_type=a2dp.CodecType.SBC,
+              media_codec_information=a2dp.SbcMediaCodecInformation(
+                  sampling_frequency=select_highest_flag(
+                      local_info.sampling_frequency
+                      & remote_info.sampling_frequency,
+                      [
+                          a2dp.SbcMediaCodecInformation.SamplingFrequency.SF_44100,
+                          a2dp.SbcMediaCodecInformation.SamplingFrequency.SF_48000,
+                          a2dp.SbcMediaCodecInformation.SamplingFrequency.SF_32000,
+                          a2dp.SbcMediaCodecInformation.SamplingFrequency.SF_16000,
+                      ],
+                  ),
+                  channel_mode=select_highest_flag(
+                      local_info.channel_mode & remote_info.channel_mode,
+                      [
+                          a2dp.SbcMediaCodecInformation.ChannelMode.JOINT_STEREO,
+                          a2dp.SbcMediaCodecInformation.ChannelMode.STEREO,
+                          a2dp.SbcMediaCodecInformation.ChannelMode.DUAL_CHANNEL,
+                          a2dp.SbcMediaCodecInformation.ChannelMode.MONO,
+                      ],
+                  ),
+                  block_length=select_highest_flag(
+                      local_info.block_length & remote_info.block_length,
+                      [
+                          a2dp.SbcMediaCodecInformation.BlockLength.BL_16,
+                          a2dp.SbcMediaCodecInformation.BlockLength.BL_12,
+                          a2dp.SbcMediaCodecInformation.BlockLength.BL_8,
+                          a2dp.SbcMediaCodecInformation.BlockLength.BL_4,
+                      ],
+                  ),
+                  subbands=select_highest_flag(
+                      local_info.subbands & remote_info.subbands,
+                      [
+                          a2dp.SbcMediaCodecInformation.Subbands.S_8,
+                          a2dp.SbcMediaCodecInformation.Subbands.S_4,
+                      ],
+                  ),
+                  allocation_method=select_highest_flag(
+                      local_info.allocation_method
+                      & remote_info.allocation_method,
+                      [
+                          a2dp.SbcMediaCodecInformation.AllocationMethod.LOUDNESS,
+                          a2dp.SbcMediaCodecInformation.AllocationMethod.SNR,
+                      ],
+                  ),
+                  minimum_bitpool_value=max(
+                      local_info.minimum_bitpool_value,
+                      remote_info.minimum_bitpool_value,
+                  ),
+                  maximum_bitpool_value=min(
+                      local_info.maximum_bitpool_value,
+                      remote_info.maximum_bitpool_value,
+                  ),
+              ),
+          ),
+      ]
+    case AptxCodecInformation():
+      if isinstance(remote_info, a2dp.VendorSpecificMediaCodecInformation):
+        remote_info = AptxCodecInformation.from_vendor_info(remote_info)
+      elif not isinstance(remote_info, AptxCodecInformation):
+        raise TypeError('Incompatible remote capabilities for APTX')
+      return [
+          avdtp.ServiceCapabilities(
+              service_category=avdtp.AVDTP_MEDIA_TRANSPORT_SERVICE_CATEGORY
+          ),
+          avdtp.MediaCodecCapabilities(
+              media_type=avdtp.MediaType.AUDIO,
+              media_codec_type=a2dp.CodecType.NON_A2DP,
+              media_codec_information=AptxCodecInformation(
+                  sample_rate=AptxSamplingRate(
+                      select_highest_flag(
+                          local_info.sample_rate & remote_info.sample_rate,
+                          [
+                              AptxSamplingRate.RATE_44100,
+                              AptxSamplingRate.RATE_48000,
+                          ],
+                      )
+                  ),
+                  channel_mode=AptxChannelMode(
+                      select_highest_flag(
+                          local_info.channel_mode & remote_info.channel_mode,
+                          [AptxChannelMode.STEREO, AptxChannelMode.MONO],
+                      )
+                  ),
+              ),
+          ),
+      ]
+    case AptxHdCodecInformation():
+      if isinstance(remote_info, a2dp.VendorSpecificMediaCodecInformation):
+        remote_info = AptxHdCodecInformation.from_vendor_info(remote_info)
+      elif not isinstance(remote_info, AptxHdCodecInformation):
+        raise TypeError('Incompatible remote capabilities for APTX-HD')
+      return [
+          avdtp.ServiceCapabilities(
+              service_category=avdtp.AVDTP_MEDIA_TRANSPORT_SERVICE_CATEGORY
+          ),
+          avdtp.MediaCodecCapabilities(
+              media_type=avdtp.MediaType.AUDIO,
+              media_codec_type=a2dp.CodecType.NON_A2DP,
+              media_codec_information=AptxHdCodecInformation(
+                  sample_rate=AptxSamplingRate(
+                      select_highest_flag(
+                          local_info.sample_rate & remote_info.sample_rate,
+                          [
+                              AptxSamplingRate.RATE_44100,
+                              AptxSamplingRate.RATE_48000,
+                          ],
+                      )
+                  ),
+                  channel_mode=AptxChannelMode(
+                      select_highest_flag(
+                          local_info.channel_mode & remote_info.channel_mode,
+                          [AptxChannelMode.STEREO, AptxChannelMode.MONO],
+                      )
+                  ),
+              ),
+          ),
+      ]
+    case LdacCodecInformation():
+      if isinstance(remote_info, a2dp.VendorSpecificMediaCodecInformation):
+        remote_info = LdacCodecInformation.from_vendor_info(remote_info)
+      elif not isinstance(remote_info, LdacCodecInformation):
+        raise TypeError('Incompatible remote capabilities for LDAC')
+      return [
+          avdtp.ServiceCapabilities(
+              service_category=avdtp.AVDTP_MEDIA_TRANSPORT_SERVICE_CATEGORY
+          ),
+          avdtp.MediaCodecCapabilities(
+              media_type=avdtp.MediaType.AUDIO,
+              media_codec_type=a2dp.CodecType.NON_A2DP,
+              media_codec_information=LdacCodecInformation(
+                  sample_rate=LdacSamplingRate(
+                      select_highest_flag(
+                          local_info.sample_rate & remote_info.sample_rate,
+                          [
+                              LdacSamplingRate.RATE_96000,
+                              LdacSamplingRate.RATE_88200,
+                              LdacSamplingRate.RATE_48000,
+                              LdacSamplingRate.RATE_44100,
+                              LdacSamplingRate.RATE_192000,
+                              LdacSamplingRate.RATE_176400,
+                          ],
+                      )
+                  ),
+                  channel_mode=LdacChannelMode(
+                      select_highest_flag(
+                          local_info.channel_mode & remote_info.channel_mode,
+                          [
+                              LdacChannelMode.STEREO,
+                              LdacChannelMode.DUAL,
+                              LdacChannelMode.MONO,
+                          ],
+                      )
+                  ),
+              ),
+          ),
+      ]
+    case a2dp.OpusMediaCodecInformation():
+      if not isinstance(remote_info, a2dp.OpusMediaCodecInformation):
+        raise TypeError('Incompatible remote capabilities for OPUS')
+      return [
+          avdtp.ServiceCapabilities(
+              service_category=avdtp.AVDTP_MEDIA_TRANSPORT_SERVICE_CATEGORY
+          ),
+          avdtp.MediaCodecCapabilities(
+              media_type=avdtp.MediaType.AUDIO,
+              media_codec_type=a2dp.CodecType.NON_A2DP,
+              media_codec_information=a2dp.OpusMediaCodecInformation(
+                  sampling_frequency=select_highest_flag(
+                      local_info.sampling_frequency
+                      & remote_info.sampling_frequency,
+                      [
+                          a2dp.OpusMediaCodecInformation.SamplingFrequency.SF_48000,
+                      ],
+                  ),
+                  channel_mode=select_highest_flag(
+                      local_info.channel_mode & remote_info.channel_mode,
+                      [
+                          a2dp.OpusMediaCodecInformation.ChannelMode.STEREO,
+                          a2dp.OpusMediaCodecInformation.ChannelMode.MONO,
+                      ],
+                  ),
+                  frame_size=select_highest_flag(
+                      local_info.frame_size & remote_info.frame_size,
+                      [
+                          a2dp.OpusMediaCodecInformation.FrameSize.FS_20MS,
+                          a2dp.OpusMediaCodecInformation.FrameSize.FS_10MS,
+                      ],
+                  ),
+              ),
+          ),
+      ]
+    case _:
+      raise ValueError(f'Unsupported codec info: {local_info!r}')
 
 
 class LocalSinkWrapper:
