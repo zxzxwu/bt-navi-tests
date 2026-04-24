@@ -32,9 +32,10 @@ doc = [
 ]
 
 [project.scripts]
-venti = "navi.tests.main:run_venti"
-smoke = "navi.tests.main:run_smoke"
-run_all = "navi.tests.main:run_all"
+navi_venti = "navi.tests.main:run_venti"
+navi_smoke = "navi.tests.main:run_smoke"
+navi_firmware = "navi.tests.main:run_firmware"
+navi_all = "navi.tests.main:run_all"
 
 [tool.setuptools]
 packages = ["navi"]

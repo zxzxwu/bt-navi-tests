@@ -138,11 +138,11 @@ This test suite has been integrated with [Mobly Android Partner Tools](https://g
 
 ```bash
 # Smoke
-mobly_runner smoke -c config.yml -tb default -i [-u]
+mobly_runner navi_smoke -c config.yml -tb default -i [-u]
 # Venti (More functionality tests)
-mobly_runner venti -c config.yml -tb default -i [-u]
+mobly_runner navi_venti -c config.yml -tb default -i [-u]
 # All (Smoke + Venti)
-mobly_runner run_all -c config.yml -tb default -i [-u]
+mobly_runner navi_all -c config.yml -tb default -i [-u]
 ```
 
 NOTE: If -c and -tb is not specified, Mobly mobly_runner will automatically select all devices with the order present in `adb devices`. Check `mobly_runner -h` for more details.
