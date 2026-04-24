@@ -51,3 +51,42 @@ Whether full log data will be recorded no matter passed or not, including:
 Type: boolean, default is False
 
 Whether to dump crown log on fail for debugging.
+
+## custom_test_session
+
+Type: string (Python class path)
+
+The full Python path to a custom test session class (e.g., `my_module.MySession`). This class allows you to hook into the test lifecycle (setup/teardown) to perform custom actions.
+
+The class must inherit from `navi.tests.navi_test_base.CustomTestSession`.
+
+Available hooks to override:
+
+* `setup_class()`: Called during `setup_class` after `async_setup_class`.
+* `teardown_class()`: Called during `teardown_class` before `async_teardown_class`.
+* `setup_test()`: Called during `setup_test` after `async_setup_test`.
+* `teardown_test()`: Called during `teardown_test` before `async_teardown_test`.
+
+The custom session class receives the test class instance in its constructor (`__init__`), which can be accessed via `self.test_class`.
+
+Example:
+
+In your Mobly config `config.yml`:
+
+```yaml
+TestParams:
+  custom_test_session: my_custom_package.my_module.MySession
+```
+
+In `my_custom_package/my_module.py`:
+
+```python
+from navi.tests.navi_test_base import CustomTestSession
+
+class MySession(CustomTestSession):
+    def setup_test(self):
+        self.test_class.logger.info("Running custom setup for test: %s", self.test_class.current_test_info.name)
+
+    def teardown_test(self):
+        self.test_class.logger.info("Running custom teardown")
+```
