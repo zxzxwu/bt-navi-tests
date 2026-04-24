@@ -23,6 +23,7 @@ from mobly import base_test
 from mobly import suite_runner
 
 from navi.tests import smoke
+from navi.tests import firmware
 from navi.tests import functionality
 
 
@@ -49,5 +50,9 @@ def run_venti() -> None:
     _run_suite([functionality])
 
 
+def run_firmware() -> None:
+    _run_suite([firmware])
+
+
 def run_all() -> None:
-    _run_suite([smoke, functionality])
+    _run_suite([smoke, functionality, firmware])

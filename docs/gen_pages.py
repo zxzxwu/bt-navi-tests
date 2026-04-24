@@ -6,6 +6,7 @@ import types
 from mobly import base_test
 from collections.abc import Generator
 import navi.tests.benchmark
+import navi.tests.firmware
 import navi.tests.functionality
 import navi.tests.smoke
 
@@ -28,7 +29,12 @@ def iter_modules(root: types.ModuleType) -> Generator[types.ModuleType]:
         yield from iter_modules(module)
 
 
-for category in (navi.tests.benchmark, navi.tests.functionality, navi.tests.smoke):
+for category in (
+    navi.tests.benchmark,
+    navi.tests.functionality,
+    navi.tests.smoke,
+    navi.tests.firmware,
+):
     category_name = category.__name__.split(".")[-1]
     with mkdocs_gen_files.open(f"cases/{category_name}.md", "w") as f:
         for module in iter_modules(category):

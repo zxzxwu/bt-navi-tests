@@ -50,4 +50,4 @@ jobs:
 
     - name: Get Test List
       run: |
-        uv run run_all -l
+        uv run navi_all -l
