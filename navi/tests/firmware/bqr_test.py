@@ -44,7 +44,7 @@ class BqrTest(test_base.DualDeviceTestBase):
     _manufacturer_name: The manufacturer name of the Bluetooth Firmware.
   """
 
-  _bqr_version: int = 0
+  _bqr_version: tuple[int, int] = (0, 0)
   _manufacturer_name: str = 'Unknown'
 
   @override
@@ -84,7 +84,7 @@ class BqrTest(test_base.DualDeviceTestBase):
 
     self._bqr_version = response.version_supported
     self.logger.info(
-        '_device_bqr_version_verify _bqr_version: %d',
+        '_device_bqr_version_verify _bqr_version: %s',
         self._bqr_version,
     )
 
@@ -114,7 +114,7 @@ class BqrTest(test_base.DualDeviceTestBase):
           bqr_minimum_report_interval=0,
           event_received_times=1,
           connection_required=True,
-          min_bqr_version=bqr.Version.V3_4,
+          min_bqr_version=bqr.Version.V3,
       ),
       energy_monitoring_mode_periodically=dict(
           bqr_eventmask=bqr.BqrQualityEventMask.ENERGY_MONITORING_MODE,
@@ -123,7 +123,7 @@ class BqrTest(test_base.DualDeviceTestBase):
           bqr_minimum_report_interval=1000,
           event_received_times=5,
           connection_required=True,
-          min_bqr_version=bqr.Version.V3_4,
+          min_bqr_version=bqr.Version.V3,
       ),
       advance_rf_status_one_time_query=dict(
           bqr_eventmask=bqr.BqrQualityEventMask.ADV_RF_STATS_TRIGGER,
@@ -171,7 +171,7 @@ class BqrTest(test_base.DualDeviceTestBase):
       min_bqr_version: The minimum BQR version supported by the device.
     """
 
-    if self._bqr_version < min_bqr_version:
+    if self._bqr_version < bqr.min_supported_vendor_version(min_bqr_version):
       self.skipTest(
           f'BQR {min_bqr_version.name}+ is not supported on this device.'
       )
@@ -232,7 +232,7 @@ class BqrTest(test_base.DualDeviceTestBase):
       4. Received Command Complete event and verify no more quality monitoring
       mode related vendor event.
     """
-    if self._bqr_version < bqr.Version.V1:
+    if self._bqr_version < bqr.min_supported_vendor_version(bqr.Version.V1):
       self.skipTest('BQR v1+ is not supported on this device.')
 
     bqr_eventmask = bqr.BqrQualityEventMask.QUALITY_MONITORING_MODE

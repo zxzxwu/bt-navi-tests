@@ -561,7 +561,7 @@ class LeHostTest(navi_test_base.TwoDevicesTestBase):
           core.BT_LE_TRANSPORT,
       ):
         self.logger.info("[REF] Disconnect.")
-        with contextlib.suppress(hci.HCI_StatusError):
+        with contextlib.suppress(hci.HCI_Error, hci.HCI_StatusError):
           await ref_dut_acl.disconnect()
       await dut_cb.wait_for_event(bl4a_api.AclDisconnected)
 

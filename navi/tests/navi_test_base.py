@@ -144,14 +144,8 @@ class AndroidSnippetDeviceWrapper:
   @retry_lib.retry_on_exception(initial_delay_sec=1, num_retries=3)
   def __init__(self, device: android_device.AndroidDevice) -> None:
     self.device = device
-    # Sync time.
-    adb_snippets.sync_time(self.device)
-    # Disable Selinux.
-    self.adb.shell("setenforce 0")
-    # Enable BT Snoop.
-    adb_snippets.enable_btsnoop(self.device)
-    # Enable BT verbose logging.
-    self.adb.shell("setprop persist.log.tag.bluetooth VERBOSE")
+    # Enable debug features if applicable.
+    self.enable_debug()
     # Load Bluetooth Snippet.
     self.device.load_snippet(
         self._SNIPPET_NAME, android_constants.PACKAGE_NAME_BLUETOOTH_SNIPPET
@@ -180,6 +174,28 @@ class AndroidSnippetDeviceWrapper:
         )
       else:
         self.shell("am start -a com.android.setupwizard.FOUR_CORNER_EXIT")
+
+  def enable_debug(self) -> None:
+    """Enables debug features if the build is userdebug or eng."""
+    build_type = self.getprop("ro.build.type")
+    if build_type in ("userdebug", "eng"):
+      # Sync time.
+      adb_snippets.sync_time(self.device)
+      # Disable Selinux.
+      self.adb.shell("setenforce 0")
+      # Enable BT Snoop.
+      adb_snippets.enable_btsnoop(self.device)
+      # Enable BT verbose logging.
+      self.adb.shell("setprop persist.log.tag.bluetooth VERBOSE")
+    else:
+      logging.warning(
+          "Device is not running a userdebug or eng build. Skipping automatic "
+          "debug configuration:\n"
+          "1. Time synchronization was not performed (ensure DUT time matches "
+          "host to prevent log timestamp issues).\n"
+          "2. Bluetooth Snoop logs and verbose logging were not enabled "
+          "(can be manually enabled in Developer Options)."
+      )
 
   @property
   def adb(self) -> adb.AdbProxy:

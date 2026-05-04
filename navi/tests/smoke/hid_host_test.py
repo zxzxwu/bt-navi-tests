@@ -16,6 +16,7 @@
 
 import asyncio
 import contextlib
+import enum
 import struct
 
 from bumble import core
@@ -31,9 +32,20 @@ from navi.utils import bl4a_api
 from navi.utils import constants
 from navi.utils import input as input_utils
 
-
 _DEFAULT_STEP_TIMEOUT_SECONDS = 10.0
 _VIDEO_SERVICE_NAME = "video"
+
+
+class AndroidProtocolMode(enum.IntEnum):
+  """Android Protocol modes.
+
+  Android framework inverts the USB HID protocol mode constants.
+  Bumble: BOOT = 0, REPORT = 1
+  Android API : REPORT = 0, BOOT = 1
+  """
+
+  REPORT_PROTOCOL = 0
+  BOOT_PROTOCOL = 1
 
 
 class Delegate(hid.Device.Delegate):
@@ -363,6 +375,10 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
       self.logger.info("[DUT] Wait for acl disconnected")
       await dut_adapter_cb.wait_for_event(bl4a_api.AclDisconnected)
 
+      self.logger.info("[DUT] Try to connect to REF")
+      is_connected = self.dut.bt.connect(self.ref.address)
+      self.assertFalse(is_connected)
+
   @navi_test_base.named_parameterized(
       dict(
           testcase_name="from_host",
@@ -532,6 +548,198 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
               address=self.ref.address,
               idle_time=idle_time,
           )
+      )
+
+  @navi_test_base.parameterized(
+      (android_constants.ConnectionPolicy.ALLOWED),
+      (android_constants.ConnectionPolicy.FORBIDDEN),
+  )
+  async def test_bt_on_off(
+      self, connection_policy: android_constants.ConnectionPolicy
+  ) -> None:
+    """Tests the BT on off.
+
+    Test steps:
+      1. Establish the HID connection between DUT and REF.
+      2. If connection policy is FORBIDDEN, set it.
+      3. Turn off BT on DUT.
+      4. Wait for HID to disconnect.
+      5. Turn on BT on DUT.
+      6. Attempt to connect to REF.
+      7. Verify that HID connects if connection policy is ALLOWED, and does not
+         connect if FORBIDDEN.
+
+    Args:
+      connection_policy: The connection policy to set.
+    """
+    await self.test_connect()
+
+    with self.dut.bl4a.register_callback(
+        bl4a_api.Module.HID_HOST
+    ) as dut_hid_cb:
+      if connection_policy == android_constants.ConnectionPolicy.FORBIDDEN:
+        self.logger.info("[DUT] Set connection policy to forbidden")
+        self.dut.bt.setHidHostConnectionPolicy(
+            self.ref.address, android_constants.ConnectionPolicy.FORBIDDEN
+        )
+
+      self.logger.info("[DUT] Turn off BT")
+      self.dut.bt.disable()
+
+      self.logger.info("[DUT] Wait for BT disabled.")
+      self.dut.bt.waitForAdapterState(android_constants.AdapterState.OFF)
+
+      self.logger.info("[DUT] Wait for HID disconnected")
+      await dut_hid_cb.wait_for_event(
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.DISCONNECTED,
+          ),
+      )
+
+      self.logger.info("[DUT] Turn on BT")
+      self.dut.bt.enable()
+
+      self.logger.info("[DUT] Wait for BT enabled.")
+      self.dut.bt.waitForAdapterState(android_constants.AdapterState.ON)
+
+      is_connected = self.dut.bt.connect(self.ref.address)
+
+      if connection_policy == android_constants.ConnectionPolicy.ALLOWED:
+        self.logger.info("[DUT] Wait for HID connected")
+        await dut_hid_cb.wait_for_event(
+            bl4a_api.ProfileConnectionStateChanged(
+                address=self.ref.address,
+                state=android_constants.ConnectionState.CONNECTED,
+            ),
+        )
+      else:
+        self.assertFalse(is_connected)
+
+  async def test_get_and_set_protocol_mode(self) -> None:
+    """Tests the HID get and set protocol mode.
+
+    Test steps:
+      1. Establish the HID connection between DUT and REF.
+      2. Get the protocol mode.
+      3. Verify the protocol mode is correctly set.
+      4. Set the protocol mode to BOOT_MODE.
+      5. Verify the protocol mode is correctly set.
+      6. Set the protocol mode to REPORT_MODE.
+      7. Verify the protocol mode is correctly set.
+    """
+    await self.test_connect()
+
+    with self.dut.bl4a.register_callback(
+        bl4a_api.Module.HID_HOST
+    ) as dut_hid_cb:
+      self.logger.info("[DUT] Get the protocol mode")
+      self.dut.bt.getHidHostProtocolMode(self.ref.address)
+
+      self.logger.info("[DUT] Verify the protocol mode is REPORT_PROTOCOL")
+      await dut_hid_cb.wait_for_event(
+          bl4a_api.HidHostProtocolModeChanged(
+              address=self.ref.address,
+              protocol_mode=AndroidProtocolMode.REPORT_PROTOCOL,
+          )
+      )
+
+      self.logger.info("[DUT] Set the protocol mode to BOOT_PROTOCOL")
+      self.dut.bt.setHidHostProtocolMode(
+          self.ref.address, AndroidProtocolMode.BOOT_PROTOCOL
+      )
+
+      self.logger.info("[DUT] Verify the protocol mode is set successfully")
+      await dut_hid_cb.wait_for_event(
+          bl4a_api.HidHostHandshake(
+              address=self.ref.address,
+              status=hid.HandshakeMessage.ResultCode.SUCCESSFUL,
+          )
+      )
+
+      self.logger.info("[DUT] Get the protocol mode")
+      self.dut.bt.getHidHostProtocolMode(self.ref.address)
+
+      self.logger.info("[DUT] Verify the protocol mode is BOOT_PROTOCOL")
+      await dut_hid_cb.wait_for_event(
+          bl4a_api.HidHostProtocolModeChanged(
+              address=self.ref.address,
+              protocol_mode=AndroidProtocolMode.BOOT_PROTOCOL,
+          )
+      )
+
+      self.logger.info("[DUT] Set the protocol mode to REPORT_PROTOCOL")
+      self.dut.bt.setHidHostProtocolMode(
+          self.ref.address,
+          AndroidProtocolMode.REPORT_PROTOCOL,
+      )
+
+      self.logger.info("[DUT] Verify the protocol mode is set successfully")
+      await dut_hid_cb.wait_for_event(
+          bl4a_api.HidHostHandshake(
+              address=self.ref.address,
+              status=hid.HandshakeMessage.ResultCode.SUCCESSFUL,
+          )
+      )
+
+      self.logger.info("[DUT] Get the protocol mode")
+      self.dut.bt.getHidHostProtocolMode(self.ref.address)
+
+      self.logger.info("[DUT] Verify the protocol mode is REPORT_PROTOCOL")
+      await dut_hid_cb.wait_for_event(
+          bl4a_api.HidHostProtocolModeChanged(
+              address=self.ref.address,
+              protocol_mode=AndroidProtocolMode.REPORT_PROTOCOL,
+          )
+      )
+
+  async def test_remove_bond_when_connection_pending(self) -> None:
+    """Tests the HID remove bond when connection pending.
+
+    Test steps:
+      1. Start the HID connection between DUT and REF.
+      2. Set the connectable to False on REF.
+      3. DUT attempts to connect to REF.
+      4. Remove the bond between DUT and REF.
+      5. Verify the hid host profile connection is not established.
+    """
+    await self.test_connect()
+
+    self.logger.info("[DUT] Disconnect")
+    self.dut.bt.disconnect(self.ref.address)
+
+    self.logger.info("[REF] Set connectable to False")
+    await self.ref.device.set_connectable(False)
+
+    with (
+        self.dut.bl4a.register_callback(
+            bl4a_api.Module.HID_HOST
+        ) as hid_host_cb,
+        self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER) as adapter_cb,
+    ):
+      self.logger.info("[DUT] Connect")
+      self.dut.bt.connect(self.ref.address)
+
+      self.logger.info("[DUT] Wait for HID connecting")
+      await hid_host_cb.wait_for_event(
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.CONNECTING,
+          )
+      )
+
+      self.logger.info("[DUT] Remove bond")
+      self.dut.bt.removeBond(self.ref.address)
+
+      self.logger.info("[DUT] Wait for acl disconnected")
+      await adapter_cb.wait_for_event(bl4a_api.AclDisconnected)
+
+      self.logger.info("[DUT] Wait for HID disconnected")
+      await hid_host_cb.wait_for_event(
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.DISCONNECTED,
+          ),
       )
 
 

@@ -1652,6 +1652,19 @@ class HidHostIdleTimeChanged(JsonDeserializableEvent):
 
 
 @dataclasses.dataclass
+class HidHostProtocolModeChanged(JsonDeserializableEvent):
+  """HID Host action protocol mode."""
+
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  protocol_mode: int = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_PROTOCOL_MODE}
+  )
+  EVENT_NAME = snippet_constants.HID_HOST_PROTOCOL_MODE_CHANGED
+
+
+@dataclasses.dataclass
 class MediaItemAdded(JsonDeserializableEvent):
   """Media item added from MediaBrowserServiceSnippet."""
 

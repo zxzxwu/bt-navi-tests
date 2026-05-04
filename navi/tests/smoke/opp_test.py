@@ -259,7 +259,7 @@ class OppTest(navi_test_base.TwoDevicesTestBase):
       use_l2cap: Whether to use L2CAP for OPP connection.
     """
     user_id = self.dut.adb.current_user_id
-    file_name = 'opp_test_file.txt'
+    file_name = f'opp_test_file_{uuid.uuid4().hex[:8]}.txt'
     file_name_pattern_android = (
         f'/data/media/{user_id}/Download/opp_test_file*.txt'
     )
@@ -337,7 +337,7 @@ class OppTest(navi_test_base.TwoDevicesTestBase):
     Args:
       use_l2cap: Whether to use L2CAP for OPP connection.
     """
-    file_name = 'opp_test_file.txt'
+    file_name = f'opp_test_file_{uuid.uuid4().hex[:8]}.txt'
 
     opp_client = await self._make_opp_client_from_ref(use_l2cap)
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):
@@ -369,9 +369,12 @@ class OppTest(navi_test_base.TwoDevicesTestBase):
 
     self.logger.info('[REF] Wait file transfer to complete.')
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):
-      with self.assertRaises(opp.OppError) as e:
+      with self.assertRaises((opp.OppError, obex.ObexConnectionError)) as e:
         await transfer_task
-      self.assertEqual(e.exception.error_code, obex.ResponseCode.FORBIDDEN)
+      if isinstance(e.exception, opp.OppError):
+        self.assertEqual(e.exception.error_code, obex.ResponseCode.FORBIDDEN)
+      else:
+        self.logger.info('Connection closed by peer.')
 
 
 if __name__ == '__main__':

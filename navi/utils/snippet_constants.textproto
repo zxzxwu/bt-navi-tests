@@ -136,6 +136,11 @@ constants {
 }
 
 constants {
+  name: "FIELD_PROTOCOL_MODE"
+  string_value: "protocol_mode"
+}
+
+constants {
   name: "FIELD_COMMON"
   string_value: "common"
 }
@@ -1329,6 +1334,11 @@ constants {
 constants {
   name: "HID_HOST_IDLE_TIME_CHANGED"
   string_value: "HID_HOST_IDLE_TIME_CHANGED"
+}
+
+constants {
+  name: "HID_HOST_PROTOCOL_MODE_CHANGED"
+  string_value: "HID_HOST_PROTOCOL_MODE_CHANGED"
 }
 
 # ============================ #

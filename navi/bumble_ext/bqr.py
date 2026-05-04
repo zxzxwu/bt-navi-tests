@@ -25,14 +25,36 @@ from bumble import hci
 
 
 class Version(enum.IntEnum):
-  """BQR version enum for firmware local info support."""
+  """BQR version."""
 
-  V1 = 256
-  V2 = 257
-  V3_4 = 258
-  V5 = 259
-  V6 = 260
-  V7 = 261
+  V1 = 1
+  V2 = 2
+  V3 = 3
+  V4 = 4
+  V5 = 5
+  V6 = 6
+  V7 = 7
+
+
+def min_supported_vendor_version(
+    version: Version,
+) -> tuple[int, int]:
+  """Returns the minimum vendor version supporting the given BQR version."""
+  match version:
+    case Version.V1:
+      return (1, 0)
+    case Version.V2:
+      return (1, 0)
+    case Version.V3 | Version.V4:
+      return (1, 1)
+    case Version.V5:
+      return (1, 2)
+    case Version.V6:
+      return (1, 3)
+    case Version.V7:
+      return (1, 4)
+    case _:
+      raise ValueError(f'Unsupported BQR version: {version}')
 
 
 # Define an Enum for BQR_Report_Action
@@ -138,7 +160,14 @@ class HciBqrLeGetVendorCapabilitiesCommandReturnParameters(
   """
 
   le_capabilities_offset_0: int = dataclasses.field(metadata=hci.metadata(8))
-  version_supported: int = dataclasses.field(metadata=hci.metadata(2))
+  version_supported: tuple[int, int] = dataclasses.field(
+      metadata=hci.metadata({
+          'parser': lambda data, offset: (
+              offset + 2,
+              (data[offset + 1], data[offset]),
+          ),
+      })
+  )
   le_capabilities_offset_1: int = dataclasses.field(metadata=hci.metadata(15))
 
 
