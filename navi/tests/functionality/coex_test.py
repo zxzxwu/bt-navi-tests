@@ -848,6 +848,9 @@ class CoexTest(navi_test_base.MultiDevicesTestBase):
             bl4a_api.ProfileActiveDeviceChanged(ref.random_address)
         )
 
+    self.logger.info("[DUT] Wait 1s to parse media context.")
+    await asyncio.sleep(1.0)
+
     self.logger.info("[DUT] Set repeat mode to one.")
     self.dut.bt.audioSetRepeat(android_constants.RepeatMode.ONE)
 
@@ -863,7 +866,7 @@ class CoexTest(navi_test_base.MultiDevicesTestBase):
           sink_ase[1], ascs.AudioStreamEndpointCharacteristic.State.STREAMING
       )
 
-    # Wait for the ase of dut to enter streaming.
+    self.logger.info("[DUT] Wait 0.5s for ase to enter streaming.")
     await asyncio.sleep(0.5)
 
     for i, ref in enumerate(self.refs):

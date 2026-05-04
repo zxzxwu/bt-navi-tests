@@ -549,6 +549,10 @@ class ConnectResponse(Response):
     )
 
 
+class ObexConnectionError(Exception):
+  """Exception raised for errors in the OBEX connection."""
+
+
 class ClientSession:
   """OBEX client session."""
 
@@ -561,6 +565,7 @@ class ClientSession:
     self.bearer = bearer
     self._reassembler = SduReassembler(self._on_sdu)
     self.bearer.sink = self._reassembler.feed
+    self.bearer.on(self.bearer.EVENT_CLOSE, self._on_close)
 
   async def send_request(self, request: Request) -> Response:
     """Sends a request."""
@@ -569,6 +574,13 @@ class ClientSession:
     self.last_request_opcode = request.opcode
     self._pending_response = asyncio.get_running_loop().create_future()
     return await self._pending_response
+
+  def _on_close(self) -> None:
+    """Handles bearer closure."""
+    if self._pending_response and not self._pending_response.done():
+      self._pending_response.set_exception(
+          ObexConnectionError('Connection closed')
+      )
 
   def _on_sdu(self, pdu: bytes) -> None:
     """Handles an incoming PDU."""

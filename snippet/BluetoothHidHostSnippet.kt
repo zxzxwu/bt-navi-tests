@@ -49,6 +49,7 @@ class BluetoothHidHostSnippet : Snippet {
         addAction(HID_HOST_ACTION_HANDSHAKE)
         addAction(HID_HOST_ACTION_REPORT)
         addAction(HID_HOST_ACTION_IDLE_TIME_CHANGED)
+        addAction(HID_HOST_ACTION_PROTOCOL_MODE_CHANGED)
       }
     broadcastReceivers[callbackId] =
       object : BroadcastReceiver() {
@@ -59,6 +60,7 @@ class BluetoothHidHostSnippet : Snippet {
           val status = intent.getIntExtra(HID_HOST_EXTRA_STATUS, -1)
           val report = intent.getByteArrayExtra(HID_HOST_EXTRA_REPORT)
           val idleTime = intent.getIntExtra(HID_HOST_EXTRA_IDLE_TIME, -1)
+          val protocolMode = intent.getIntExtra(HID_HOST_EXTRA_PROTOCOL_MODE, -1)
           when (intent.action) {
             BluetoothHidHost.ACTION_CONNECTION_STATE_CHANGED ->
               Utils.postSnippetEvent(callbackId, SnippetConstants.PROFILE_CONNECTION_STATE_CHANGE) {
@@ -80,6 +82,11 @@ class BluetoothHidHostSnippet : Snippet {
               Utils.postSnippetEvent(callbackId, SnippetConstants.HID_HOST_IDLE_TIME_CHANGED) {
                 putString(SnippetConstants.FIELD_DEVICE, device?.address)
                 putInt(SnippetConstants.FIELD_IDLE_TIME, idleTime)
+              }
+            HID_HOST_ACTION_PROTOCOL_MODE_CHANGED ->
+              Utils.postSnippetEvent(callbackId, SnippetConstants.HID_HOST_PROTOCOL_MODE_CHANGED) {
+                putString(SnippetConstants.FIELD_DEVICE, device?.address)
+                putInt(SnippetConstants.FIELD_PROTOCOL_MODE, protocolMode)
               }
           }
         }
@@ -223,8 +230,12 @@ class BluetoothHidHostSnippet : Snippet {
     const val HID_HOST_ACTION_REPORT = "android.bluetooth.input.profile.action.REPORT"
     const val HID_HOST_ACTION_IDLE_TIME_CHANGED =
       "android.bluetooth.input.profile.action.IDLE_TIME_CHANGED"
+    const val HID_HOST_ACTION_PROTOCOL_MODE_CHANGED =
+      "android.bluetooth.input.profile.action.PROTOCOL_MODE_CHANGED"
     const val HID_HOST_EXTRA_STATUS = "android.bluetooth.BluetoothHidHost.extra.STATUS"
     const val HID_HOST_EXTRA_REPORT = "android.bluetooth.BluetoothHidHost.extra.REPORT"
     const val HID_HOST_EXTRA_IDLE_TIME = "android.bluetooth.BluetoothHidHost.extra.IDLE_TIME"
+    const val HID_HOST_EXTRA_PROTOCOL_MODE =
+      "android.bluetooth.BluetoothHidHost.extra.PROTOCOL_MODE"
   }
 }

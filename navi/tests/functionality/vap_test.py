@@ -74,7 +74,7 @@ class VapTest(navi_test_base.TwoDevicesTestBase):
     # Disable all other voice command apps to prevent choosing activities.
     voice_command_packages: set[str] = set(
         re.findall(
-            r"packageName=(.+)",
+            r"packageName=([\w\.]+)",
             self.dut.shell([
                 "pm",
                 "query-activities",

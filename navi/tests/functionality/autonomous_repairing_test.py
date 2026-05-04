@@ -97,8 +97,7 @@ class AutonomousRepairingTest(navi_test_base.TwoDevicesTestBase):
       self.fail("[REF] Keystore is not initialized.")
 
     bumble_keys = await self.ref.device.keystore.get(f"{self.dut.address}/P")
-    self.assertIsNotNone(bumble_keys, f"No keys found for {self.dut.address}/P")
-    assert bumble_keys is not None
+    assert bumble_keys is not None, f"No keys found for {self.dut.address}/P"
     if link_key:
       self.assertIsNotNone(bumble_keys.link_key, "No link key found.")
     if check_ltk:
@@ -809,10 +808,8 @@ class AutonomousRepairingTest(navi_test_base.TwoDevicesTestBase):
         await auth_task
 
     if pairing_direction == constants.Direction.INCOMING:
-      self.assertIsNotNone(ref_dut_acl)
-      self.assertIsNotNone(server)
-      assert ref_dut_acl is not None
-      assert server is not None
+      assert ref_dut_acl is not None, "No ACL connection found."
+      assert server is not None, "No RFCOMM server found."
 
       self.logger.info("[REF] Encrypt ACL connection.")
       await ref_dut_acl.encrypt()

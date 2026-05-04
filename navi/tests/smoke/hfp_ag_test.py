@@ -107,7 +107,7 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
     self.logger.info("[DUT] Disable all other voice command apps.")
     voice_command_packages: set[str] = set(
         re.findall(
-            r"packageName=(.+)",
+            r"packageName=([\w\.]+)",
             self.dut.shell([
                 "pm",
                 "query-activities",

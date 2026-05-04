@@ -861,6 +861,148 @@ class LePairingTest(navi_test_base.TwoDevicesTestBase):
         '[DUT] Identity address does not match.',
     )
 
+  async def test_repairing_on_br_after_le_bond_removal(self) -> None:
+    """Tests repairing on BR/EDR after LE bond removal.
+
+    Context: b/326294532.
+
+    Test steps:
+      1. REF is discoverable and connectable over LE
+      2. DUT connects and bonds to REF over LE
+      3. DUT disconnects from the REF device
+      4. DUT removes the REF device
+      5. REF becomes discoverable over BR/EDR but not over LE
+      6. DUT finds the REF device via inquiry
+      7. DUT attempts to bond with the REF device over BR/EDR
+    """
+    ref_rpa = hci.Address.generate_private_address(self.ref.device.irk)
+    ref_rpa_str = str(ref_rpa).upper()
+    self.ref.device.pairing_config_factory = lambda _: pairing.PairingConfig(
+        identity_address_type=pairing.PairingConfig.AddressType.PUBLIC,
+        delegate=pairing.PairingDelegate(
+            io_capability=pairing.PairingDelegate.IoCapability.DISPLAY_OUTPUT_AND_KEYBOARD_INPUT,
+        ),
+    )
+
+    self.logger.info('[REF] Stop advertising over BR/EDR.')
+    await self.ref.device.set_discoverable(False)
+
+    self.logger.info('[REF] Start advertising with RPA: %s', ref_rpa)
+    await self.ref.device.create_advertising_set(
+        random_address=ref_rpa,
+        auto_start=True,
+        auto_restart=False,
+    )
+
+    adapter_cb = self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER)
+    self.test_case_context.push(adapter_cb)
+
+    self.logger.info('[DUT] Connect and bond to REF over LE.')
+    self.dut.bt.createBond(
+        ref_rpa_str,
+        android_constants.Transport.LE,
+        android_constants.AddressTypeStatus.RANDOM,
+    )
+
+    self.logger.info('[DUT] Wait for pairing request.')
+    await adapter_cb.wait_for_event(
+        bl4a_api.PairingRequest(
+            address=ref_rpa_str,
+            variant=matcher.ANY,
+            pin=matcher.ANY,
+        ),
+        timeout=_DEFAULT_SETUP_TIMEOUT_SECONDS,
+    )
+
+    self.logger.info('[DUT] Provide pairing confirmation.')
+    self.dut.bt.setPairingConfirmation(ref_rpa_str, True)
+
+    self.logger.info('[DUT] Wait for bond state changed.')
+    bond_state_changed_event = await adapter_cb.wait_for_event(
+        bl4a_api.BondStateChanged(
+            address=ref_rpa_str,
+            state=matcher.any_of(*_TERMINATED_BOND_STATES),
+        ),
+        timeout=_DEFAULT_SETUP_TIMEOUT_SECONDS,
+    )
+    self.assertEqual(
+        bond_state_changed_event.state,
+        android_constants.BondState.BONDED,
+        'Bond state should be BONDED after pairing',
+    )
+
+    self.logger.info('[DUT] Disconnect.')
+    self.dut.bt.disconnect(ref_rpa_str)
+
+    self.logger.info('[DUT] Wait for ACL disconnected.')
+    await adapter_cb.wait_for_event(
+        bl4a_api.AclDisconnected(
+            address=ref_rpa_str,
+            transport=android_constants.Transport.LE,
+        ),
+        timeout=_DEFAULT_SETUP_TIMEOUT_SECONDS,
+    )
+
+    self.logger.info('[DUT] Remove bond.')
+    self.dut.bt.removeBond(ref_rpa_str)
+
+    self.logger.info('[DUT] Wait for bond state removed.')
+    await adapter_cb.wait_for_event(
+        bl4a_api.BondStateChanged(
+            address=ref_rpa_str,
+            state=android_constants.BondState.NONE,
+        ),
+        timeout=_DEFAULT_SETUP_TIMEOUT_SECONDS,
+    )
+
+    self.logger.info('[REF] Start advertising over BR/EDR.')
+    await self.ref.device.set_discoverable(True)
+
+    self.logger.info('[DUT] Find REF device via inquiry.')
+    self.dut.bt.startInquiry()
+
+    self.logger.info('[DUT] Wait for inquiry results.')
+    await adapter_cb.wait_for_event(
+        bl4a_api.DeviceFound(
+            address=self.ref.address,
+            name=matcher.ANY,
+            rssi=matcher.ANY,
+        ),
+        timeout=_DEFAULT_SETUP_TIMEOUT_SECONDS,
+    )
+
+    self.logger.info('[DUT] Attempt to bond with REF over BR/EDR.')
+    self.dut.bt.createBond(
+        self.ref.address, android_constants.Transport.CLASSIC
+    )
+
+    self.logger.info('[DUT] Wait for pairing request.')
+    await adapter_cb.wait_for_event(
+        bl4a_api.PairingRequest(
+            address=self.ref.address,
+            variant=matcher.ANY,
+            pin=matcher.ANY,
+        ),
+        timeout=_DEFAULT_SETUP_TIMEOUT_SECONDS,
+    )
+
+    self.logger.info('[DUT] Provide pairing confirmation.')
+    self.dut.bt.setPairingConfirmation(self.ref.address, True)
+
+    self.logger.info('[DUT] Wait for bond state changed.')
+    bond_state_changed_event = await adapter_cb.wait_for_event(
+        bl4a_api.BondStateChanged(
+            address=self.ref.address,
+            state=matcher.any_of(*_TERMINATED_BOND_STATES),
+        ),
+        timeout=_DEFAULT_SETUP_TIMEOUT_SECONDS,
+    )
+    self.assertEqual(
+        bond_state_changed_event.state,
+        android_constants.BondState.BONDED,
+        'Bond state should be BONDED after pairing',
+    )
+
 
 if __name__ == '__main__':
   test_runner.main()
