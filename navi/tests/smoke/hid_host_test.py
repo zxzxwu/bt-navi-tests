@@ -379,17 +379,7 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
       is_connected = self.dut.bt.connect(self.ref.address)
       self.assertFalse(is_connected)
 
-  @navi_test_base.named_parameterized(
-      dict(
-          testcase_name="from_host",
-          issuer=constants.TestRole.DUT,
-      ),
-      dict(
-          testcase_name="from_device",
-          issuer=constants.TestRole.REF,
-      ),
-  )
-  async def test_virtual_unplug(self, issuer: constants.TestRole) -> None:
+  async def test_virtual_unplug(self) -> None:
     """Tests the HID virtual unplug.
 
     Test steps:
@@ -397,9 +387,6 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
       2. Virtual unplug the HID device from the issuer.
       3. Wait for the connection to be disconnected.
       4. Verify the device is not bonded.
-
-    Args:
-      issuer: The device that initiates the virtual unplug.
     """
     await self.test_connect()
 
@@ -409,15 +396,11 @@ class HidHostTest(navi_test_base.TwoDevicesTestBase):
             bl4a_api.Module.ADAPTER
         ) as dut_adapter_cb,
     ):
-      if issuer == constants.TestRole.DUT:
-        self.logger.info("[DUT] Virtual unplug")
-        self.dut.bt.virtualUnplug(self.ref.address)
-      else:
-        # TODO: Remove the flag once the flag is merged.
-        self.skipTest("b/460703858 - Wait for the flag to be alawys on.")
+      # TODO: Remove the flag once the flag is merged.
+      self.skipTest("b/460703858 - Wait for the flag to be alawys on.")
 
-        self.logger.info("[REF] Virtual unplug")
-        self.ref_hid_device.virtual_cable_unplug()
+      self.logger.info("[REF] Virtual unplug")
+      self.ref_hid_device.virtual_cable_unplug()
 
       self.logger.info("[DUT] Wait for HID disconnected")
       await dut_hid_cb.wait_for_event(

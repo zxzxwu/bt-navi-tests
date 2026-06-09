@@ -69,7 +69,7 @@ class L2capTest(navi_test_base.TwoDevicesTestBase):
   async def _test_transmission(
       self,
       ref_dut_l2cap_channel: l2cap.LeCreditBasedChannel,
-      dut_ref_l2cap_channel: bl4a_api.L2capChannel,
+      dut_ref_l2cap_channel: bl4a_api.L2capSocket,
   ) -> None:
     # Store received SDUs in queue.
     ref_sdu_rx_queue = asyncio.Queue[bytes]()
@@ -121,45 +121,47 @@ class L2capTest(navi_test_base.TwoDevicesTestBase):
 
     secure = variant == Variant.SECURE
 
-    server = self.dut.bl4a.create_l2cap_server(secure=secure)
-    self.logger.info("[DUT] Listen L2CAP on PSM %d", server.psm)
+    with self.dut.bl4a.create_l2cap_server(secure=secure) as server:
+      self.logger.info("[DUT] Listen L2CAP on PSM %d", server.psm)
 
-    self.logger.info("[DUT] Start advertising.")
-    await self.dut.bl4a.start_legacy_advertiser(
-        settings=bl4a_api.LegacyAdvertiseSettings(
-            own_address_type=android_constants.AddressTypeStatus.PUBLIC
-        ),
-    )
-
-    self.logger.info("[REF] Connect to DUT.")
-    ref_dut_acl = await self.ref.device.connect(
-        f"{self.dut.address}/P",
-        transport=core.BT_LE_TRANSPORT,
-        timeout=datetime.timedelta(seconds=15).total_seconds(),
-        own_address_type=hci.OwnAddressType.RANDOM,
-    )
-
-    # Workaround: Request feature exchange to avoid connection failure.
-    async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):
-      await ref_dut_acl.get_remote_le_features()
-
-    if secure:
-      async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):
-        await ref_dut_acl.encrypt(True)
-
-    self.logger.info("[REF] Connect L2CAP channel to DUT.")
-    async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):
-      ref_dut_l2cap_channel, dut_ref_l2cap_channel = await asyncio.gather(
-          ref_dut_acl.create_l2cap_channel(
-              l2cap.LeCreditBasedChannelSpec(psm=server.psm)
+      self.logger.info("[DUT] Start advertising.")
+      await self.dut.bl4a.start_legacy_advertiser(
+          settings=bl4a_api.LegacyAdvertiseSettings(
+              own_address_type=android_constants.AddressTypeStatus.PUBLIC
           ),
-          server.accept(),
       )
 
-    await self._test_transmission(ref_dut_l2cap_channel, dut_ref_l2cap_channel)
+      self.logger.info("[REF] Connect to DUT.")
+      ref_dut_acl = await self.ref.device.connect(
+          f"{self.dut.address}/P",
+          transport=core.BT_LE_TRANSPORT,
+          timeout=datetime.timedelta(seconds=15).total_seconds(),
+          own_address_type=hci.OwnAddressType.RANDOM,
+      )
 
-    self.logger.info("[REF] Disconnect L2CAP channel.")
-    await ref_dut_l2cap_channel.disconnect()
+      # Workaround: Request feature exchange to avoid connection failure.
+      async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):
+        await ref_dut_acl.get_remote_le_features()
+
+      if secure:
+        async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):
+          await ref_dut_acl.encrypt(True)
+
+      self.logger.info("[REF] Connect L2CAP channel to DUT.")
+      async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):
+        ref_dut_l2cap_channel, dut_ref_l2cap_channel = await asyncio.gather(
+            ref_dut_acl.create_l2cap_channel(
+                l2cap.LeCreditBasedChannelSpec(psm=server.psm)
+            ),
+            server.accept(),
+        )
+
+      await self._test_transmission(
+          ref_dut_l2cap_channel, dut_ref_l2cap_channel
+      )
+
+      self.logger.info("[REF] Disconnect L2CAP channel.")
+      await ref_dut_l2cap_channel.disconnect()
 
   @navi_test_base.parameterized(Variant.SECURE, Variant.INSECURE)
   async def test_outgoing_connection(self, variant: Variant) -> None:
@@ -269,8 +271,8 @@ class L2capTest(navi_test_base.TwoDevicesTestBase):
       2. Connect L2CAP from REF to DUT.
     """
     # Open a server to allocate a PSM, but close it immediately.
-    server = self.dut.bl4a.create_l2cap_server(secure=False)
-    server.close()
+    with self.dut.bl4a.create_l2cap_server(secure=False) as server:
+      pass
 
     self.logger.info("[DUT] Start advertising.")
     await self.dut.bl4a.start_legacy_advertiser(

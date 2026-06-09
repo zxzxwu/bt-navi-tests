@@ -20,6 +20,7 @@ import datetime
 import enum
 import itertools
 from unittest import mock
+import uuid
 
 from bumble import core
 from bumble import device
@@ -37,7 +38,6 @@ from navi.utils import constants
 from navi.utils import matcher
 from navi.utils import pairing as pairing_utils
 from navi.utils import pyee_extensions
-
 
 _TERMINATED_BOND_STATES = (
     android_constants.BondState.BONDED,
@@ -631,9 +631,7 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
 
     await dut_cb.wait_for_event(
         bl4a_api.DeviceFound(
-            address=self.ref.address,
-            name=mock.ANY,
-            rssi=mock.ANY
+            address=self.ref.address, name=mock.ANY, rssi=mock.ANY
         ),
     )
 
@@ -735,6 +733,71 @@ class ClassicPairingTest(navi_test_base.TwoDevicesTestBase):
 
     self.logger.info("[DUT] Check if bond is not removed.")
     self.assertIn(self.ref.address, self.dut.bt.getBondedDevices())
+
+  async def test_remove_bond_should_reset_security_flag(self) -> None:
+    """Tests that security flags are reset after bond removal.
+
+    Note:
+      * If the name is not present in EIR, stack should request name after
+        inquiry_complete. No FOUND action with name should be broadcasted, but
+        NAME_CHANGED should be broadcasted.
+      * After bond removal, stack should clean up the name info in the inquiry
+        result cache, and try to repeat the step above.
+
+
+    Test steps:
+      1. Pair DUT and REF.
+      2. Set local name on REF.
+      3. Remove bond on DUT.
+      4. Verify REF name is not in inquiry response.
+      5. Verify REF name is updated.
+    """
+    if (
+        self.dut.getprop("bluetooth.restrict_discovered_device.enabled")
+        == "true"
+    ):
+      self.skipTest(
+          "bluetooth.restrict_discovered_device.enabled will ignore devices"
+          " without name in inquiry response."
+      )
+
+    # Bond, and then remove bond.
+    await self.test_remove_bond()
+
+    self.logger.info(
+        "[REF] Set EIR to empty to disable name in inquiry response."
+    )
+    self.ref.device.inquiry_response = b""
+    await self.ref.device.set_discoverable(True)
+
+    ref_name = str(uuid.uuid4())
+    self.logger.info("[REF] Set local name to %s.", ref_name)
+    await self.ref.device.send_sync_command(
+        hci.HCI_Write_Local_Name_Command(local_name=ref_name.encode("utf8"))
+    )
+
+    adapter_cb = self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER)
+    self.test_case_context.push(adapter_cb)
+
+    self.logger.info("[DUT] Search for REF.")
+    self.dut.bt.startInquiry()
+
+    self.logger.info("[DUT] Wait for REF to be found.")
+    await adapter_cb.wait_for_event(
+        bl4a_api.DeviceFound(
+            address=self.ref.address,
+            name=None,
+            rssi=mock.ANY,
+        )
+    )
+
+    self.logger.info("[DUT] Wait for REF name to change.")
+    await adapter_cb.wait_for_event(
+        bl4a_api.DeviceNameChanged(
+            address=self.ref.address,
+            name=ref_name,
+        )
+    )
 
 
 if __name__ == "__main__":

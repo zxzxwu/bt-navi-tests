@@ -14,7 +14,6 @@
 
 import asyncio
 import secrets
-import uuid
 
 from bumble import gatt
 from bumble import gatt_client
@@ -38,6 +37,38 @@ _Property = android_constants.GattCharacteristicProperty
 _Permission = android_constants.GattCharacteristicPermission
 _CCCD_UUID = (
     bluetooth_constants.BluetoothAssignedUuid.CLIENT_CHARACTERISTIC_CONFIGURATION_DESCRIPTOR
+)
+
+_TEST_SERVICE_UUID = "9e72cf4a-0100-47c2-835b-efcecf84931a"
+_READ_CHAR_UUID = "9e72cf4a-0200-47c2-835b-efcecf84931a"
+_WRITE_CHAR_UUID = "9e72cf4a-0300-47c2-835b-efcecf84931a"
+_SUBSCRIBE_CHAR_UUID = "9e72cf4a-0400-47c2-835b-efcecf84931a"
+
+_GATT_SERVICE = bl4a_api.GattService(
+    uuid=_TEST_SERVICE_UUID,
+    characteristics=(
+        bl4a_api.GattCharacteristic(
+            uuid=_READ_CHAR_UUID,
+            properties=_Property.READ,
+            permissions=_Permission.READ,
+        ),
+        bl4a_api.GattCharacteristic(
+            uuid=_WRITE_CHAR_UUID,
+            properties=_Property.WRITE | _Property.WRITE_NO_RESPONSE,
+            permissions=_Permission.WRITE,
+        ),
+        bl4a_api.GattCharacteristic(
+            uuid=_SUBSCRIBE_CHAR_UUID,
+            properties=_Property.READ | _Property.NOTIFY | _Property.INDICATE,
+            permissions=_Permission.READ,
+            descriptors=(
+                bl4a_api.GattDescriptor(
+                    uuid=_CCCD_UUID,
+                    permissions=_Permission.READ | _Permission.WRITE,
+                ),
+            ),
+        ),
+    ),
 )
 
 
@@ -95,37 +126,48 @@ class GattServerTest(navi_test_base.TwoDevicesTestBase):
       3. Discover services from REF.
       4. Verify added service is discovered.
     """
-    service_uuid = str(uuid.uuid4())
-    characteristic_uuid = str(uuid.uuid4())
-
     self.logger.info("[DUT] Add a service.")
-    await self.dut_gatt_server.add_service(
-        bl4a_api.GattService(
-            uuid=service_uuid,
-            characteristics=[
-                bl4a_api.GattCharacteristic(
-                    uuid=characteristic_uuid,
-                    properties=_Property.READ,
-                    permissions=_Permission.READ,
-                )
-            ],
-        ),
-    )
+    await self.dut_gatt_server.add_service(_GATT_SERVICE)
 
     self.logger.info("[REF] Connect to DUT.")
     ref_dut_acl = await self._make_le_connection()
 
     async with bumble.device.Peer(ref_dut_acl) as peer:
       self.logger.info("[REF] Check services.")
-      services = peer.get_services_by_uuid(bumble.core.UUID(service_uuid))
+      services = peer.get_services_by_uuid(bumble.core.UUID(_TEST_SERVICE_UUID))
       self.assertLen(services, 1)
-      characteristics = services[0].get_characteristics_by_uuid(
-          bumble.core.UUID(characteristic_uuid)
-      )
-      self.assertLen(characteristics, 1)
-      self.assertEqual(
-          characteristics[0].properties, gatt.Characteristic.Properties.READ
-      )
+
+      with self.subTest("Read Characteristic"):
+        read_chars = services[0].get_characteristics_by_uuid(
+            bumble.core.UUID(_READ_CHAR_UUID)
+        )
+        self.assertLen(read_chars, 1)
+        self.assertEqual(
+            read_chars[0].properties, gatt.Characteristic.Properties.READ
+        )
+
+      with self.subTest("Write Characteristic"):
+        write_chars = services[0].get_characteristics_by_uuid(
+            bumble.core.UUID(_WRITE_CHAR_UUID)
+        )
+        self.assertLen(write_chars, 1)
+        self.assertEqual(
+            write_chars[0].properties,
+            gatt.Characteristic.Properties.WRITE
+            | gatt.Characteristic.Properties.WRITE_WITHOUT_RESPONSE,
+        )
+
+      with self.subTest("Subscribe Characteristic"):
+        sub_chars = services[0].get_characteristics_by_uuid(
+            bumble.core.UUID(_SUBSCRIBE_CHAR_UUID)
+        )
+        self.assertLen(sub_chars, 1)
+        self.assertEqual(
+            sub_chars[0].properties,
+            gatt.Characteristic.Properties.READ
+            | gatt.Characteristic.Properties.NOTIFY
+            | gatt.Characteristic.Properties.INDICATE,
+        )
 
   async def test_handle_characteristic_read_request(self) -> None:
     """Tests handling a characteristic read request.
@@ -138,31 +180,15 @@ class GattServerTest(navi_test_base.TwoDevicesTestBase):
       4. Handle the read request and send response from DUT.
       5. Check read result from REF.
     """
-    # UUID must be random here, otherwise there might be interference when
-    # multiple tests run in the same box.
-    service_uuid = str(uuid.uuid4())
-    characteristic_uuid = str(uuid.uuid4())
-
     self.logger.info("[DUT] Add a service.")
-    await self.dut_gatt_server.add_service(
-        bl4a_api.GattService(
-            uuid=service_uuid,
-            characteristics=[
-                bl4a_api.GattCharacteristic(
-                    uuid=characteristic_uuid,
-                    properties=_Property.READ,
-                    permissions=_Permission.READ,
-                )
-            ],
-        ),
-    )
+    await self.dut_gatt_server.add_service(_GATT_SERVICE)
 
     self.logger.info("[REF] Connect to DUT.")
     ref_dut_acl = await self._make_le_connection()
 
     async with bumble.device.Peer(ref_dut_acl) as peer:
       characteristic = peer.get_characteristics_by_uuid(
-          bumble.core.UUID(characteristic_uuid)
+          bumble.core.UUID(_READ_CHAR_UUID)
       )[0]
 
       self.logger.info("[REF] Read characteristic.")
@@ -171,7 +197,7 @@ class GattServerTest(navi_test_base.TwoDevicesTestBase):
       read_request = await self.dut_gatt_server.wait_for_event(
           event=bl4a_api.GattCharacteristicReadRequest,
           predicate=lambda request: (
-              request.characteristic_uuid == characteristic_uuid
+              request.characteristic_uuid == _READ_CHAR_UUID
           ),
       )
       expected_data = secrets.token_bytes(16)
@@ -205,31 +231,15 @@ class GattServerTest(navi_test_base.TwoDevicesTestBase):
         True, test write with response; otherwise, test write without response.
     """
 
-    # UUID must be random here, otherwise there might be interference when
-    # multiple tests run in the same box.
-    service_uuid = str(uuid.uuid4())
-    characteristic_uuid = str(uuid.uuid4())
-
     self.logger.info("[DUT] Add a service.")
-    await self.dut_gatt_server.add_service(
-        bl4a_api.GattService(
-            uuid=service_uuid,
-            characteristics=[
-                bl4a_api.GattCharacteristic(
-                    uuid=characteristic_uuid,
-                    properties=_Property.WRITE | _Property.WRITE_NO_RESPONSE,
-                    permissions=_Permission.WRITE,
-                )
-            ],
-        ),
-    )
+    await self.dut_gatt_server.add_service(_GATT_SERVICE)
 
     self.logger.info("[REF] Connect to DUT.")
     ref_dut_acl = await self._make_le_connection()
 
     async with bumble.device.Peer(ref_dut_acl) as peer:
       characteristic = peer.get_characteristics_by_uuid(
-          bumble.core.UUID(characteristic_uuid)
+          bumble.core.UUID(_WRITE_CHAR_UUID)
       )[0]
 
       self.logger.info("[REF] Write characteristic.")
@@ -241,7 +251,7 @@ class GattServerTest(navi_test_base.TwoDevicesTestBase):
       write_request = await self.dut_gatt_server.wait_for_event(
           event=bl4a_api.GattCharacteristicWriteRequest,
           predicate=lambda request: (
-              request.characteristic_uuid == characteristic_uuid
+              request.characteristic_uuid == _WRITE_CHAR_UUID
           ),
       )
       self.assertEqual(write_request.value, expected_data)
@@ -274,34 +284,10 @@ class GattServerTest(navi_test_base.TwoDevicesTestBase):
         notification; otherwise, send indication.
     """
 
-    # UUID must be random here, otherwise there might be interference when
-    # multiple tests run in the same box.
-    service_uuid = str(uuid.uuid4())
-    characteristic_uuid = str(uuid.uuid4())
-
     self.logger.info("[DUT] Add a service.")
-    await self.dut_gatt_server.add_service(
-        bl4a_api.GattService(
-            uuid=service_uuid,
-            characteristics=[
-                bl4a_api.GattCharacteristic(
-                    uuid=characteristic_uuid,
-                    properties=(
-                        _Property.READ | _Property.NOTIFY | _Property.INDICATE
-                    ),
-                    permissions=_Permission.READ,
-                    descriptors=[
-                        bl4a_api.GattDescriptor(
-                            uuid=_CCCD_UUID,
-                            permissions=_Permission.READ | _Permission.WRITE,
-                        )
-                    ],
-                )
-            ],
-        ),
-    )
+    await self.dut_gatt_server.add_service(_GATT_SERVICE)
     dut_characteristic = bl4a_api.find_characteristic_by_uuid(
-        characteristic_uuid, self.dut_gatt_server.services
+        _SUBSCRIBE_CHAR_UUID, self.dut_gatt_server.services
     )
     if not dut_characteristic.handle:
       self.fail("Cannot find characteristic.")
@@ -311,7 +297,7 @@ class GattServerTest(navi_test_base.TwoDevicesTestBase):
 
     async with bumble.device.Peer(ref_dut_acl) as peer:
       ref_characteristic = peer.get_characteristics_by_uuid(
-          bumble.core.UUID(characteristic_uuid)
+          bumble.core.UUID(_SUBSCRIBE_CHAR_UUID)
       )[0]
 
       self.logger.info("[REF] Subscribe characteristic.")

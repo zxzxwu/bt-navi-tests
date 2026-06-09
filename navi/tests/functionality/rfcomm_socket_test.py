@@ -20,7 +20,6 @@ import uuid
 
 from bumble import core
 from bumble import device
-from bumble import l2cap
 from bumble import pairing
 from bumble import rfcomm
 from bumble import smp
@@ -184,65 +183,25 @@ class RfcommSocketTest(navi_test_base.TwoDevicesTestBase):
     Typical duration: 30-60s.
 
     Test steps:
-      1. Create TWO RFCOMM sockets server on REF.
-      2. Connect TWO RFCOMM sockets from DUT to REF at the same time.
-      3. Reject the Rfcomm connection request on REF by l2cap connection
-      request with No resources available.
-      4. Verify the DUT can catch the exceptions raised for both RFCOMM
-      connections .
+      1. Connect 2 RFCOMM sockets from DUT to REF at the same time.
+      2. Verify the DUT can catch the exceptions raised for both RFCOMM
+        connections.
     """
-    original_on_l2cap_connection_request = (
-        self.ref.device.l2cap_channel_manager.on_l2cap_connection_request
-    )
+    rfcomm_sockets: list[bl4a_api.RfcommSocket] = []
 
-    def custom_on_l2cap_connection_request(
-        connection: device.Connection,
-        cid: int,
-        request: l2cap.L2CAP_Connection_Request,
-    ) -> None:
-      self.logger.info(
-          " _custom_on_l2cap_connection_request:: psm: %s", request.psm
-      )
-
-      if request.psm == rfcomm.RFCOMM_PSM:
-        self.logger.info(" RFCOMM L2CAP connection request rejected")
-        self.ref.device.l2cap_channel_manager.send_control_frame(
-            connection,
-            cid,
-            l2cap.L2CAP_Connection_Response(
-                identifier=request.identifier,
-                destination_cid=0,
-                source_cid=request.source_cid,
-                result=l2cap.L2CAP_Connection_Response.Result.CONNECTION_REFUSED_NO_RESOURCES_AVAILABLE,
-                status=0x0000,
-            ),
-        )
-      else:
-        original_on_l2cap_connection_request(connection, cid, request)
-
-    # Replace the original on_l2cap_connection_request with the custom one.
-    self.ref.device.l2cap_channel_manager.on_l2cap_connection_request = (
-        custom_on_l2cap_connection_request
-    )
-
-    ref_accept_future = asyncio.get_running_loop().create_future()
-    rfcomm_sockets: list[bl4a_api.RfcommChannel] = []
-
-    rfcomm_server = rfcomm.Server(self.ref.device)
     for i in range(2):
       # Create RFCOMM sockets server on REF.
-      rfcomm_channel = rfcomm_server.listen(
-          acceptor=ref_accept_future.set_result,
-      )
       rfcomm_uuid = str(uuid.uuid4())
       self.logger.info(
           "[REF] Create %d RFCOMM socket server with rfcomm_uuid %s.",
           i,
           rfcomm_uuid,
       )
+      # Only make SDP records, but not listen on the channel, so L2CAP
+      # connection will be rejected with PSM_NOT_SUPPORTED status.
       self.ref.device.sdp_service_records[i] = rfcomm.make_service_sdp_records(
           service_record_handle=i,
-          channel=rfcomm_channel,
+          channel=i + 1,
           uuid=core.UUID(rfcomm_uuid),
       )
 

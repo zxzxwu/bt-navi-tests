@@ -85,6 +85,9 @@ class Property(enum.StrEnum):
   )
   # AVRCP
   AVRCP_VERSION = "persist.bluetooth.avrcpversion"
+  RFCOMM_SYSPROXY_RX_EXIT_SNIFF = "bluetooth.rfcomm.sysproxy.rx.exit_sniff"
+  # A2DP Source.
+  A2DP_SOURCE_OPUS_ENABLED = "persist.bluetooth.opus.enabled"
 
 
 class Transport(enum.IntEnum):
@@ -538,6 +541,20 @@ class CallState(enum.IntEnum):
   PULLING_CALL = 11
   AUDIO_PROCESSING = 12
   SIMULATED_RINGING = 13
+
+
+class CallEndpointType(enum.IntEnum):
+  """A type of call endpoint.
+
+  Source: android.telecom.CallEndpoint.TYPE_*.
+  """
+
+  UNKNOWN = -1
+  EARPIECE = 1
+  BLUETOOTH = 2
+  WIRED_HEADSET = 3
+  SPEAKER = 4
+  STREAMING = 5
 
 
 class Phy(enum.IntEnum):
@@ -1019,3 +1036,12 @@ class MediaPlaybackState(enum.IntEnum):
   SKIPPING_TO_PREVIOUS = 9
   SKIPPING_TO_NEXT = 10
   SKIPPING_TO_QUEUE_ITEM = 11
+
+
+class BluetoothSocketType(enum.IntEnum):
+  """android.bluetooth.BluetoothSocket.TYPE_*."""
+
+  RFCOMM = 1
+  SCO = 2
+  L2CAP = 3
+  LE = 4

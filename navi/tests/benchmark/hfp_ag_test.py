@@ -284,6 +284,11 @@ class HfpAgTest(test_base.PerformanceTestBase):
               predicate=lambda e: e.state in [_CallState.DISCONNECTED],
               timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
           )
+          self.logger.info("[DUT] Wait for call removed.")
+          await dut_telecom_cb.wait_for_event(
+              event=bl4a_api.CallRemoved(handle=mock.ANY, name=mock.ANY),
+              timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
+          )
 
         self.logger.info("[DUT] Wait for SCO disconnected.")
         await dut_hfp_cb.wait_for_event(

@@ -21,7 +21,7 @@ module majorly refers to the implementation of AOSP:
 """
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 import dataclasses
 import enum
 import struct
@@ -34,6 +34,7 @@ from bumble import core
 from bumble import device as device_lib
 from bumble import sdp
 
+from navi.bumble_ext import avdtp as avdtp_ext
 from navi.bumble_ext import ogg
 from navi.utils import constants
 
@@ -251,7 +252,12 @@ class A2dpCodec(constants.ShortReprEnum):
             media_type=avdtp.MediaType.AUDIO,
             media_codec_type=a2dp.CodecType.NON_A2DP,
             media_codec_information=LdacCodecInformation(
-                sample_rate=LdacSamplingRate.RATE_48000,
+                sample_rate=(
+                    LdacSamplingRate.RATE_44100
+                    | LdacSamplingRate.RATE_48000
+                    | LdacSamplingRate.RATE_88200
+                    | LdacSamplingRate.RATE_96000
+                ),
                 channel_mode=LdacChannelMode.STEREO,
             ),
         )
@@ -645,13 +651,13 @@ def register_sink_buffer(
     case A2dpCodec.SBC | A2dpCodec.LDAC:
 
       @sink.on(avdtp.LocalSink.EVENT_RTP_PACKET)
-      def _(packet: avdtp.MediaPacket) -> None:
+      def on_rtp_packet_sbc_ldac(packet: avdtp.MediaPacket) -> None:
         buffer.extend(packet.payload[1:])
 
     case A2dpCodec.AAC:
 
       @sink.on(avdtp.LocalSink.EVENT_RTP_PACKET)
-      def _(packet: avdtp.MediaPacket) -> None:
+      def on_rtp_packet_aac(packet: avdtp.MediaPacket) -> None:
         buffer.extend(
             codecs.AacAudioRtpPacket.from_bytes(packet.payload).to_adts()
         )
@@ -668,7 +674,7 @@ def register_sink_buffer(
     case A2dpCodec.APTX_HD:
 
       @sink.on(avdtp.LocalSink.EVENT_RTP_PACKET)
-      def _(packet: avdtp.MediaPacket) -> None:
+      def on_rtp_packet_aptx_hd(packet: avdtp.MediaPacket) -> None:
         buffer.extend(packet.payload)
 
     case A2dpCodec.OPUS:
@@ -693,7 +699,7 @@ def register_sink_buffer(
       page_sequence_number = 2
 
       @sink.on(avdtp.LocalSink.EVENT_RTP_PACKET)
-      def _(packet: avdtp.MediaPacket) -> None:
+      def on_rtp_packet_opus(packet: avdtp.MediaPacket) -> None:
         nonlocal page_sequence_number
         buffer.extend(
             ogg.Page(
@@ -754,21 +760,27 @@ def setup_sink_server(
     device: device_lib.Device,
     supported_capabilities: Sequence[avdtp.MediaCodecCapabilities],
     a2dp_sink_handle: int,
-) -> avdtp.Listener:
+    *,
+    protocol_factory: Callable[..., avdtp.Protocol] | None = None,
+) -> avdtp_ext.Listener:
   """Sets up the sink server on the device.
 
   Args:
     device: The device to set up the sink server on.
     supported_capabilities: The capabilities of the sink server.
     a2dp_sink_handle: The handle of the A2DP sink service record.
+    protocol_factory: Factory function or class for creating the AVDTP protocol
+      instance.
 
   Returns:
     The AVDTP listener.
   """
-  listener = avdtp.Listener.for_device(device)
+  listener = avdtp_ext.Listener.for_device(
+      device, protocol_factory=protocol_factory
+  )
 
   @listener.on(listener.EVENT_CONNECTION)
-  def _(server: avdtp.Protocol) -> None:
+  def _(server: avdtp_ext.Protocol) -> None:
     for capability in supported_capabilities:
       server.add_sink(capability)
 

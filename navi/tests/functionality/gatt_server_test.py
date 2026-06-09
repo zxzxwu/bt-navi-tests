@@ -20,6 +20,7 @@ import asyncio
 import secrets
 import uuid
 
+from bumble import att
 from bumble import core
 from bumble import device
 from bumble import gatt
@@ -289,19 +290,63 @@ class GattServerVentiTest(navi_test_base.TwoDevicesTestBase):
       )
       await write_task
 
-  async def test_private_server_handle_subscription(self) -> None:
-    """Tests sending GATT notification / indication to REF.
+  async def test_private_server_service_discovery_by_uuid(self) -> None:
+    """Tests GATT service discovery by UUID, testing the FindByTypeValue ATT request.
 
     Test steps:
-      1. Add a GATT service including a characteristic to the server instance.
-      2. Subscribe GATT characteristic from REF.
-      3. Handle the subscribe request (CCCD write) from DUT.
-      4. Send notification from DUT.
-      5. Check notification from REF.
+      1. Open a GATT server on DUT.
+      2. Add multiple different GATT services to the server instance.
+      3. Discover a specific service by UUID from REF.
+      4. Verify only the targeted service is discovered.
     """
+    target_service_uuid = str(uuid.uuid4())
+    other_service_uuid = str(uuid.uuid4())
 
-    # UUID must be random here, otherwise there might be interference when
-    # multiple tests run in the same box.
+    dut_gatt_server = await self._setup_gatt_server(is_private=True)
+
+    self.logger.info("[DUT] Add the target service.")
+    await dut_gatt_server.add_service(
+        bl4a_api.GattService(
+            uuid=target_service_uuid,
+        ),
+    )
+
+    self.logger.info("[DUT] Add a different service.")
+    await dut_gatt_server.add_service(
+        bl4a_api.GattService(
+            uuid=other_service_uuid,
+        ),
+    )
+
+    self.logger.info("[REF] Connect to DUT.")
+    ref_dut_acl = await self._make_le_connection()
+
+    async with device.Peer(ref_dut_acl) as peer:
+      self.logger.info("[REF] Discover specific service by UUID.")
+      # This Bumble API internally sends an ATT Find By Type Value Request
+      services = await peer.discover_service(core.UUID(target_service_uuid))
+
+      # Verify we only found the target service, and not the other service
+      self.assertLen(services, 1)
+      self.assertEqual(
+          services[0].uuid, core.UUID(target_service_uuid)
+      )
+
+  async def test_private_server_handle_characteristic_long_read_request(
+      self,
+  ) -> None:
+    """Tests handling a characteristic read blob request for long data.
+
+    Test steps:
+      1. Open a GATT server on DUT.
+      2. Add a GATT service including a readable characteristic to the server
+      instance.
+      3. Read characteristic from REF.
+      4. Handle the read request, respond with part of data, wait for next
+      request (blob).
+      5. Handle the read blob request, send the rest.
+      6. Check read result from REF.
+    """
     service_uuid = str(uuid.uuid4())
     characteristic_uuid = str(uuid.uuid4())
     dut_gatt_server = await self._setup_gatt_server(is_private=True)
@@ -313,89 +358,158 @@ class GattServerVentiTest(navi_test_base.TwoDevicesTestBase):
             characteristics=[
                 bl4a_api.GattCharacteristic(
                     uuid=characteristic_uuid,
-                    properties=(
-                        _Property.READ | _Property.NOTIFY | _Property.INDICATE
-                    ),
+                    properties=_Property.READ,
                     permissions=_Permission.READ,
-                    descriptors=[
-                        bl4a_api.GattDescriptor(
-                            uuid=_CCCD_UUID,
-                            permissions=_Permission.READ | _Permission.WRITE,
-                        )
-                    ],
                 )
             ],
         ),
     )
-    dut_characteristic = bl4a_api.find_characteristic_by_uuid(
-        characteristic_uuid, dut_gatt_server.services
-    )
-    if not dut_characteristic.handle:
-      self.fail("Cannot find characteristic.")
 
     self.logger.info("[REF] Connect to DUT.")
     ref_dut_acl = await self._make_le_connection()
 
     async with device.Peer(ref_dut_acl) as peer:
-      target_services = peer.get_services_by_uuid(uuid=core.UUID(service_uuid))
+      services = await peer.discover_services([core.UUID(service_uuid)])
+      self.assertLen(services, 1)
+      characteristics = await peer.discover_characteristics(
+          [core.UUID(characteristic_uuid)], services[0]
+      )
+      self.assertLen(characteristics, 1)
+      characteristic = characteristics[0]
 
-      if not target_services:
-        self.fail("Cannot find service.")
+      self.logger.info("[REF] Read characteristic.")
+      # Normal MTU defaults to 23, so ATT_MTU-1 is 22. We want to be much larger
+      # so we exceed the MTU and trigger the read_blob.
+      expected_data = secrets.token_bytes(64)
+      read_task = asyncio.create_task(characteristic.read_value())
 
-      ref_characteristics = peer.get_characteristics_by_uuid(
-          core.UUID(characteristic_uuid),
-          target_services[0],
+      # For 64 bytes (with MTU=23), Bumble actually needs 3 total read requests!
+      # Round 1: 0-21 (22 bytes)
+      # Round 2: 22-43 (22 bytes)
+      # Round 3: 44-63 (20 bytes)
+
+      self.logger.info("[DUT] Handle read and blob read requests.")
+      previous_request_id = -1
+
+      for _ in range(3):
+        read_request = await dut_gatt_server.wait_for_event(
+            bl4a_api.GattCharacteristicReadRequest
+        )
+        self.assertGreater(
+            read_request.request_id,
+            previous_request_id,
+            "Request ID should be increasing.",
+        )
+
+        dut_gatt_server.send_response(
+            address=read_request.address,
+            request_id=read_request.request_id,
+            status=android_constants.GattStatus.SUCCESS,
+            value=expected_data[read_request.offset:],
+            offset=read_request.offset,
+        )
+        previous_request_id = read_request.request_id
+
+      self.logger.info("[REF] Validate full read.")
+      self.assertEqual(await read_task, expected_data)
+
+  async def test_private_server_handle_characteristic_multiple_variable_read_request(
+      self,
+  ) -> None:
+    """Tests handling a characteristic multiple variable read request.
+
+    Test steps:
+      1. Open a GATT server on DUT.
+      2. Add a GATT service including 2 readable characteristics to the server
+         instance.
+      3. Send multiple variable read request from REF using
+         ATT_Read_Multiple_Variable_Request.
+      4. Handle the 2 read requests sequentially and send responses from DUT.
+      5. Check read result from REF.
+    """
+    service_uuid = str(uuid.uuid4())
+    char_uuid1 = str(uuid.uuid4())
+    char_uuid2 = str(uuid.uuid4())
+
+    dut_gatt_server = await self._setup_gatt_server(is_private=True)
+
+    self.logger.info("[DUT] Add a service.")
+    await dut_gatt_server.add_service(
+        bl4a_api.GattService(
+            uuid=service_uuid,
+            characteristics=[
+                bl4a_api.GattCharacteristic(
+                    uuid=char_uuid1,
+                    properties=_Property.READ,
+                    permissions=_Permission.READ,
+                ),
+                bl4a_api.GattCharacteristic(
+                    uuid=char_uuid2,
+                    properties=_Property.READ,
+                    permissions=_Permission.READ,
+                ),
+            ],
+        ),
+    )
+
+    self.logger.info("[REF] Connect to DUT.")
+    ref_dut_acl = await self._make_le_connection()
+
+    async with device.Peer(ref_dut_acl) as peer:
+      services = await peer.discover_services([core.UUID(service_uuid)])
+      self.assertLen(services, 1)
+
+      characteristics = await peer.discover_characteristics(
+          [core.UUID(char_uuid1), core.UUID(char_uuid2)], services[0]
+      )
+      self.assertLen(characteristics, 2)
+      char1 = next(
+          c for c in characteristics if c.uuid == core.UUID(char_uuid1)
+      )
+      char2 = next(
+          c for c in characteristics if c.uuid == core.UUID(char_uuid2)
       )
 
-      if not ref_characteristics:
-        self.fail("Cannot find characteristic.")
-
-      ref_characteristic = ref_characteristics[0]
-      self.logger.info("[REF] Subscribe characteristic.")
-      notification_queue = asyncio.Queue[bytes]()
-      expected_data = secrets.token_bytes(16)
-      subscribe_task = asyncio.create_task(
-          ref_characteristic.subscribe(
-              notification_queue.put_nowait, prefer_notify=False
-          )
+      self.logger.info("[REF] Send read multiple variable request.")
+      request = att.ATT_Read_Multiple_Variable_Request(
+          set_of_handles=[char1.handle, char2.handle]
       )
+      read_task = asyncio.create_task(peer.gatt_client.send_request(request))
 
-      self.logger.info("[DUT] Wait for CCCD write.")
-      subscribe_request = await dut_gatt_server.wait_for_event(
-          event=bl4a_api.GattDescriptorWriteRequest,
-          predicate=lambda request: (
-              request.characteristic_handle == dut_characteristic.handle
-              and request.descriptor_uuid == _CCCD_UUID
-          ),
+      self.logger.info("[DUT] Handle first read request.")
+      read_request1 = await dut_gatt_server.wait_for_event(
+          event=bl4a_api.GattCharacteristicReadRequest,
+          predicate=lambda req: req.characteristic_uuid == char_uuid1,
       )
-
-      self.logger.info("[DUT] Respond to CCCD write.")
+      expected_data1 = secrets.token_bytes(8)
       dut_gatt_server.send_response(
-          address=subscribe_request.address,
-          request_id=subscribe_request.request_id,
+          address=read_request1.address,
+          request_id=read_request1.request_id,
           status=android_constants.GattStatus.SUCCESS,
-          value=b"",
+          value=expected_data1,
       )
 
-      self.logger.info("[REF] Wait subscription complete.")
-      async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
-        await subscribe_task
-
-      self.logger.info("[DUT] Send notification.")
-      dut_gatt_server.send_notification(
-          address=self.ref.random_address,
-          characteristic_handle=dut_characteristic.handle,
-          # True for indication, False for notification. Currently rust
-          # implementation only supports indication due to which notification
-          # test fails.
-          # TODO: Add NOTIFY (0x10) in rust/private_gatt
-          confirm=True,
-          value=expected_data,
+      self.logger.info("[DUT] Handle second read request.")
+      read_request2 = await dut_gatt_server.wait_for_event(
+          event=bl4a_api.GattCharacteristicReadRequest,
+          predicate=lambda req: req.characteristic_uuid == char_uuid2,
+      )
+      expected_data2 = secrets.token_bytes(8)
+      dut_gatt_server.send_response(
+          address=read_request2.address,
+          request_id=read_request2.request_id,
+          status=android_constants.GattStatus.SUCCESS,
+          value=expected_data2,
       )
 
-      self.logger.info("[REF] Wait for notification.")
-      async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
-        self.assertEqual(await notification_queue.get(), expected_data)
+      self.logger.info("[REF] Validate full read.")
+      response = await asyncio.wait_for(
+          read_task, _DEFAULT_STEP_TIMEOUT_SECONDS
+      )
+
+      self.assertLen(response.length_value_tuple_list, 2)
+      self.assertEqual(response.length_value_tuple_list[0][1], expected_data1)
+      self.assertEqual(response.length_value_tuple_list[1][1], expected_data2)
 
   async def test_eatt_connection_without_encryption(self) -> None:
     """Tests EATT connection without encryption should fail.

@@ -10,7 +10,7 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "bumble==0.0.228",
+    "bumble==0.0.229",
     "mobly",
     "typing_extensions",
     "pydub",

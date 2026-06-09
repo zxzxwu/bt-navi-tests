@@ -26,7 +26,6 @@ import enum
 import inspect
 import itertools
 import logging
-import time
 from typing import Any, ClassVar, Self, Type, TypeVar, cast
 
 from bumble import hci
@@ -257,10 +256,15 @@ class CallbackHandler:
             )
         )
       elif predicate:
+
+        def match_and_log(e: callback_event.CallbackEvent) -> bool:
+          _logger.debug('Raw event data: %s', e.data)
+          return predicate(event.from_mapping(e.data))
+
         got = await asyncio.to_thread(
             lambda: self.handler.waitForEvent(
                 event.EVENT_NAME,
-                lambda e: predicate(event.from_mapping(e.data)),
+                match_and_log,
                 timeout=timeout,
             )
         )
@@ -512,7 +516,7 @@ class AclConnected(JsonDeserializableEvent):
   """android.bluetooth.device.action.ACL_CONNECTED.
 
   Attributes:
-    address: mac address of remote device in string format.
+    address: MAC address of remote device in string format.
     transport: transport of the connected connection.
   """
 
@@ -534,7 +538,7 @@ class AclDisconnected(JsonDeserializableEvent):
   """android.bluetooth.device.action.ACL_DISCONNECTED.
 
   Attributes:
-    address: mac address of remote device in string format.
+    address: MAC address of remote device in string format.
     transport: transport of the disconnected connection.
   """
 
@@ -556,7 +560,7 @@ class BondStateChanged(JsonDeserializableEvent):
   """android.bluetooth.device.action.BOND_STATE_CHANGED.
 
   Attributes:
-    address: mac address of remote device in string format.
+    address: MAC address of remote device in string format.
     state: new bond state of remote device.
   """
 
@@ -578,7 +582,7 @@ class EncryptionChanged(JsonDeserializableEvent):
   """android.bluetooth.device.action.ENCRYPTION_CHANGED.
 
   Attributes:
-    address: mac address of remote device in string format.
+    address: MAC address of remote device in string format.
     transport: transport of the encryption changed connection.
   """
 
@@ -600,7 +604,7 @@ class KeyMissing(JsonDeserializableEvent):
   """android.bluetooth.device.action.KEY_MISSING.
 
   Attributes:
-    address: mac address of remote device in string format.
+    address: MAC address of remote device in string format.
   """
 
   address: str = dataclasses.field(
@@ -727,7 +731,7 @@ class A2dpCodecConfigChanged(JsonDeserializableEvent):
   )
   codec_config: A2dpCodecConfiguration = dataclasses.field(
       metadata={
-          _FIELD: snippet_constants.CODEC_TYPE,
+          _FIELD: snippet_constants.CODEC_CONFIG,
           _MAPPER: A2dpCodecConfiguration.from_mapping,
       }
   )
@@ -780,7 +784,7 @@ class DeviceFound(JsonDeserializableEvent):
   """android.bluetooth.device.action.FOUND.
 
   Attributes:
-    address: mac address of remote device in string format.
+    address: MAC address of remote device in string format.
     name: name of remote device.
     rssi: RSSI of remote device.
   """
@@ -788,7 +792,9 @@ class DeviceFound(JsonDeserializableEvent):
   address: str = dataclasses.field(
       metadata={_FIELD: snippet_constants.FIELD_DEVICE}
   )
-  name: str = dataclasses.field(metadata={_FIELD: snippet_constants.FIELD_NAME})
+  name: str | None = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_NAME}
+  )
 
   rssi: int = dataclasses.field(
       metadata={_FIELD: snippet_constants.FIELD_RSSI, _MAPPER: int}
@@ -798,11 +804,28 @@ class DeviceFound(JsonDeserializableEvent):
 
 
 @dataclasses.dataclass
+class DeviceNameChanged(JsonDeserializableEvent):
+  """android.bluetooth.device.action.NAME_CHANGED.
+
+  Attributes:
+    address: MAC address of remote device in string format.
+    name: name of remote device.
+  """
+
+  address: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  name: str = dataclasses.field(metadata={_FIELD: snippet_constants.FIELD_NAME})
+
+  EVENT_NAME = snippet_constants.NAME_CHANGED
+
+
+@dataclasses.dataclass
 class AudioDeviceAdded(JsonDeserializableEvent):
   """android.media.AudioDeviceCallback.onAudioDevicesAdded.
 
   Attributes:
-    address: mac address of remote device in string format.
+    address: MAC address of remote device in string format.
     device_type: type of audio device.
   """
 
@@ -883,7 +906,7 @@ class GattCharacteristicReadRequest(JsonDeserializableEvent):
   """android.bluetooth.BluetoothGattServerCallback.onCharacteristicReadRequest.
 
   Attributes:
-    address: mac address of target device in string format.
+    address: MAC address of target device in string format.
     characteristic_uuid: Characteristic UUID in string format.
     request_id: request ID required by send_response method.
     offset: offset of value in the request.
@@ -910,7 +933,7 @@ class GattCharacteristicWriteRequest(JsonDeserializableEvent):
   """android.bluetooth.BluetoothGattServerCallback.onCharacteristicWriteRequest.
 
   Attributes:
-    address: mac address of target device in string format.
+    address: MAC address of target device in string format.
     characteristic_uuid: Characteristic UUID in string format.
     request_id: request ID required by send_response method.
     offset: offset of value in the request.
@@ -949,7 +972,7 @@ class GattDescriptorWriteRequest(JsonDeserializableEvent):
   """android.bluetooth.BluetoothGattServerCallback.onDescriptorWriteRequest.
 
   Attributes:
-    address: mac address of target device in string format.
+    address: MAC address of target device in string format.
     characteristic_handle: handle of characteristic.
     descriptor_uuid: Descriptor UUID in string format.
     request_id: request ID required by send_response method.
@@ -1097,6 +1120,23 @@ class CallStateChanged(JsonDeserializableEvent):
 
 
 @dataclasses.dataclass
+class CallRemoved(JsonDeserializableEvent):
+  """InCallService.onCallRemoved.
+
+  Attributes:
+    handle: uri handle of the call.
+    name: displayed name of caller.
+  """
+
+  handle: str = dataclasses.field(
+      metadata={_FIELD: snippet_constants.FIELD_HANDLE}
+  )
+  name: str = dataclasses.field(metadata={_FIELD: snippet_constants.FIELD_NAME})
+
+  EVENT_NAME = snippet_constants.CALL_REMOVED
+
+
+@dataclasses.dataclass
 class ProfileConnectionStateChanged(JsonDeserializableEvent):
   """android.bluetooth.*.profile.action.CONNECTION_STATE_CHANGED."""
 
@@ -1111,6 +1151,25 @@ class ProfileConnectionStateChanged(JsonDeserializableEvent):
   )
 
   EVENT_NAME = snippet_constants.PROFILE_CONNECTION_STATE_CHANGE
+
+
+@dataclasses.dataclass
+class HidDeviceAppStatusChanged(JsonDeserializableEvent):
+  """BluetoothHidDevice.Callback#onAppStatusChanged.
+
+  Attributes:
+    address: MAC address of remote device in string format.
+    registered: Whether the HID device app is registered.
+  """
+
+  address: str | None = dataclasses.field(
+      default=None, metadata={_FIELD: snippet_constants.FIELD_DEVICE}
+  )
+  registered: bool = dataclasses.field(
+      default=False, metadata={_FIELD: snippet_constants.FIELD_STATE}
+  )
+
+  EVENT_NAME = snippet_constants.HID_DEVICE_APP_STATUS_CHANGED
 
 
 @dataclasses.dataclass
@@ -2108,6 +2167,16 @@ class PhoneCall:
     """Closes the phone call."""
     self.snippet.disconnectCall(self.cookie)
 
+  async def request_call_endpoint_switch(
+      self, call_endpoint_type: android_constants.CallEndpointType | int
+  ) -> None:
+    """Requests call endpoint switch."""
+    await asyncio.to_thread(
+        lambda: self.snippet.requestCallEndpointSwitch(
+            self.cookie, call_endpoint_type
+        )
+    )
+
   def __enter__(self) -> Self:
     return self
 
@@ -2302,199 +2371,249 @@ class AudioRecorder:
       self.close()
 
 
+@dataclasses.dataclass(frozen=True)
+class BluetoothSocketSettings:
+  """Wrapper for android.bluetooth.BluetoothSocketSettings.
+
+  Attributes:
+    socket_type: The type of the socket (e.g., SocketType.LE).
+    encryption_required: Whether encryption is required for the connection.
+    authentication_required: Whether authentication is required for the
+      connection.
+    l2cap_psm: The L2CAP PSM value.
+    rfcomm_uuid: The RFCOMM UUID.
+    rfcomm_service_name: The RFCOMM Service Name.
+  """
+
+  socket_type: android_constants.BluetoothSocketType = (
+      android_constants.BluetoothSocketType.LE
+  )
+  encryption_required: bool = False
+  authentication_required: bool = False
+  l2cap_psm: int | None = None
+  rfcomm_uuid: str | None = None
+  rfcomm_service_name: str | None = None
+
+
 @dataclasses.dataclass
-class L2capChannel:
-  """L2CAP channel wrapper."""
+class BluetoothServerSocket:
+  """Wrapper for android.bluetooth.BluetoothServerSocket.
+
+  Attributes:
+    snippet: The snippet client.
+    cookie: The cookie identifying the server socket.
+    socket_type: The type of the socket.
+  """
 
   snippet: snippet_stub.BluetoothSnippet
   cookie: str
+  socket_type: android_constants.BluetoothSocketType
 
   @classmethod
-  async def connect(
-      cls: Type[Self],
+  def listen_with_settings(
+      cls,
+      snippet: snippet_stub.BluetoothSnippet,
+      settings: BluetoothSocketSettings,
+  ) -> BluetoothServerSocket:
+    """Opens a server socket using settings."""
+    serialized_settings = _make_json_object(settings)
+    cookie, allocated_port = snippet.socketListenWithSettings(
+        serialized_settings
+    )
+    if settings.socket_type == android_constants.BluetoothSocketType.RFCOMM:
+      return RfcommServerSocket(
+          snippet=snippet,
+          cookie=cookie,
+          socket_type=settings.socket_type,
+          uuid=settings.rfcomm_uuid,
+      )
+    else:
+      return L2capServerSocket(
+          snippet=snippet,
+          cookie=cookie,
+          socket_type=settings.socket_type,
+          psm=allocated_port,
+      )
+
+  async def accept(self) -> BluetoothSocket:
+    """Accepts a connection from the server socket."""
+    socket_cookie = await asyncio.to_thread(
+        self.snippet.socketAccept, self.cookie
+    )
+    return self._create_accepted_socket(socket_cookie)
+
+  def _create_accepted_socket(self, socket_cookie: str) -> BluetoothSocket:
+    raise NotImplementedError
+
+  def close(self) -> None:
+    """Closes the server socket."""
+    with contextlib.suppress(mobly.snippet.errors.ApiError):
+      self.snippet.socketClose(self.cookie)
+
+  def __enter__(self) -> Self:
+    return self
+
+  def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+    self.close()
+
+
+@dataclasses.dataclass
+class L2capServerSocket(BluetoothServerSocket):
+  """L2CAP server socket."""
+
+  AUTO_ALLOCATE_PSM = -2
+
+  psm: int | None = None
+
+  @classmethod
+  def listen(
+      cls,
+      snippet: snippet_stub.BluetoothSnippet,
+      secure: bool,
+      psm: int | None = None,
+      transport: android_constants.Transport = android_constants.Transport.LE,
+  ) -> L2capServerSocket:
+    """Opens an L2CAP server."""
+    if psm is None:
+      psm = cls.AUTO_ALLOCATE_PSM
+
+    cookie, allocated_psm = snippet.l2capOpenServer(secure, psm, transport)
+    if transport == android_constants.Transport.CLASSIC:
+      s_type = android_constants.BluetoothSocketType.L2CAP
+    else:
+      s_type = android_constants.BluetoothSocketType.LE
+    return cls(
+        snippet=snippet,
+        cookie=cookie,
+        socket_type=s_type,
+        psm=allocated_psm,
+    )
+
+  def _create_accepted_socket(self, socket_cookie: str) -> L2capSocket:
+    return L2capSocket(
+        snippet=self.snippet,
+        cookie=socket_cookie,
+        socket_type=self.socket_type,
+        psm=self.psm,
+    )
+
+  async def accept(self) -> L2capSocket:
+    return cast(L2capSocket, await super().accept())
+
+
+@dataclasses.dataclass
+class RfcommServerSocket(BluetoothServerSocket):
+  """RFCOMM server socket."""
+
+  uuid: str | None = None
+
+  @classmethod
+  def listen(
+      cls,
+      snippet: snippet_stub.BluetoothSnippet,
+      secure: bool,
+      uuid: str,
+  ) -> RfcommServerSocket:
+    """Opens an RFCOMM server."""
+    cookie = snippet.rfcommOpenServer(secure, uuid)
+    return cls(
+        snippet=snippet,
+        cookie=cookie,
+        socket_type=android_constants.BluetoothSocketType.RFCOMM,
+        uuid=uuid,
+    )
+
+  def _create_accepted_socket(self, socket_cookie: str) -> RfcommSocket:
+    return RfcommSocket(
+        snippet=self.snippet,
+        cookie=socket_cookie,
+        socket_type=self.socket_type,
+        uuid=self.uuid,
+    )
+
+  async def accept(self) -> RfcommSocket:
+    return cast(RfcommSocket, await super().accept())
+
+
+@dataclasses.dataclass
+class BluetoothSocket:
+  """Wrapper for android.bluetooth.BluetoothSocket and BluetoothServerSocket."""
+
+  snippet: snippet_stub.BluetoothSnippet
+  cookie: str
+  socket_type: android_constants.BluetoothSocketType
+
+  @classmethod
+  async def connect_with_settings(
+      cls,
       snippet: snippet_stub.BluetoothSnippet,
       address: str,
-      secure: bool,
-      psm: int,
+      settings: BluetoothSocketSettings,
       address_type: android_constants.AddressTypeStatus = android_constants.AddressTypeStatus.RANDOM,
       retry_count: int = _DEFAULT_RETRY_COUNT,
-  ) -> Self:
-    """Connects an l2cap channel.
-
-    Args:
-      snippet: Snippet client instance.
-      address: Address of target device.
-      secure: Whether encryption is required.
-      psm: Channel number of the l2cap channel.
-      address_type: Address type of target device (if LE transport is used).
-      retry_count: Allowed retry count of connect attempts.
-
-    Returns:
-      L2CAP client wrapper instance.
-
-    Raises:
-      ConnectionError: L2CAP is not connected after allowed retry counts.
-    """
+  ) -> BluetoothSocket:
+    """Connects to a socket using settings."""
+    serialized_settings = _make_json_object(settings)
 
     @retry.retry_on_exception(
         initial_delay_sec=_DEFAULT_RETRY_DELAY_SECONDS,
         num_retries=retry_count,
     )
-    async def inner():
-      with contextlib.suppress(mobly.snippet.errors.ApiError):
+    async def inner() -> BluetoothSocket:
+      try:
         cookie = await asyncio.to_thread(
-            snippet.l2capConnect,
+            snippet.socketConnectWithSettings,
             address,
-            secure,
-            psm,
             address_type,
+            serialized_settings,
         )
-        return cls(snippet=snippet, cookie=cookie)
-      raise errors.ConnectionError('Unable to connect l2cap')
+        if settings.socket_type == android_constants.BluetoothSocketType.RFCOMM:
+          return RfcommSocket(
+              snippet=snippet,
+              cookie=cookie,
+              socket_type=settings.socket_type,
+              uuid=settings.rfcomm_uuid,
+          )
+        else:
+          return L2capSocket(
+              snippet=snippet,
+              cookie=cookie,
+              socket_type=settings.socket_type,
+              psm=settings.l2cap_psm,
+          )
+      except mobly.snippet.errors.ApiError as e:
+        raise errors.ConnectionError(
+            f'Unable to connect socket to {address} with settings {settings}'
+        ) from e
 
     return await inner()
 
   async def close(self) -> None:
-    """Closes the L2CAP channel."""
-    await asyncio.to_thread(self.snippet.l2capDisconnect, self.cookie)
+    """Closes the socket."""
+    with contextlib.suppress(mobly.snippet.errors.ApiError):
+      await asyncio.to_thread(self.snippet.socketClose, self.cookie)
 
   async def read(self, length: int | None = None) -> bytes:
-    """Reads data from the L2CAP channel.
-
-    If `length` is provided, the data will be read until the length is reached.
-    Otherwise, only one read call will be performed for at most 65535 bytes.
-
-    Args:
-      length: Length of data to read.
-
-    Returns:
-      Read data.
-    """
+    """Reads data from the socket."""
     return base64.b64decode(
-        await asyncio.to_thread(self.snippet.l2capRead, self.cookie, length)
+        await asyncio.to_thread(self.snippet.socketRead, self.cookie, length)
     )
 
   async def write(self, data: bytes) -> None:
-    """Writes data to the L2CAP channel.
-
-    Args:
-      data: Data to write.
-    """
+    """Writes data to the socket."""
     await asyncio.to_thread(
-        self.snippet.l2capWrite,
+        self.snippet.socketWrite,
         self.cookie,
         base64.b64encode(data).decode('utf-8'),
     )
 
+  def available(self) -> int:
+    """Checks available bytes on the socket."""
+    return self.snippet.socketAvailable(self.cookie)
 
-@dataclasses.dataclass
-class L2capServer:
-  """L2CAP server wrapper."""
-
-  AUTO_ALLOCATE_PSM: ClassVar[int] = -2
-
-  snippet: snippet_stub.BluetoothSnippet
-  psm: int
-
-  @classmethod
-  def create(
-      cls: Type[Self],
-      snippet: snippet_stub.BluetoothSnippet,
-      secure: bool,
-      psm: int = AUTO_ALLOCATE_PSM,
-  ) -> Self:
-    """Opens an L2CAP server.
-
-    Args:
-      snippet: Snippet client instance.
-      secure: Whether encryption is required.
-      psm: L2CAP channel number.
-
-    Returns:
-      Created L2CAP server wrapper.
-    """
-    return cls(snippet=snippet, psm=snippet.l2capOpenServer(secure, psm))
-
-  def close(self) -> None:
-    """Closes the L2CAP server."""
-    self.snippet.l2capCloseServer(self.psm)
-
-  async def accept(self) -> L2capChannel:
-    """Accepts a connection from the L2CAP server."""
-    cookie = await asyncio.to_thread(self.snippet.l2capWaitConnection, self.psm)
-    return L2capChannel(snippet=self.snippet, cookie=cookie)
-
-
-@dataclasses.dataclass
-class RfcommChannel:
-  """Rfcomm channel wrapper."""
-
-  snippet: snippet_stub.BluetoothSnippet
-  cookie: str
-
-  @classmethod
-  async def connect(
-      cls: Type[Self],
-      snippet: snippet_stub.BluetoothSnippet,
-      address: str,
-      secure: bool,
-      uuid: str,
-      retry_count: int = _DEFAULT_RETRY_COUNT,
-  ) -> Self:
-    """Connects an RFCOMM channel.
-
-    Args:
-      snippet: snippet client instance.
-      address: address of target device.
-      secure: whether encryption is required.
-      uuid: UUID of the RFCOMM channel.
-      retry_count: allowed retry count of connect attempts.
-
-    Returns:
-      RFCOMM client wrapper instance.
-
-    Raises:
-      ConnectionError: RFCOMM is not connected after allowed retry counts.
-    """
-
-    @retry.retry_on_exception(
-        initial_delay_sec=_DEFAULT_RETRY_DELAY_SECONDS,
-        num_retries=retry_count,
-    )
-    async def inner() -> Self:
-      try:
-        cookie = await asyncio.to_thread(
-            lambda: snippet.rfcommConnectWithUuid(address, secure, uuid)
-        )
-        return cls(snippet=snippet, cookie=cookie)
-      except mobly.snippet.errors.ApiError as e:
-        raise errors.ConnectionError('Unable to connect RFCOMM') from e
-
-    return await inner()
-
-  @classmethod
-  def connect_async(
-      cls: Type[Self],
-      snippet: snippet_stub.BluetoothSnippet,
-      address: str,
-      secure: bool,
-      uuid: str,
-  ) -> Self:
-    """Connects an RFCOMM channel asynchronously.
-
-    Args:
-      snippet: snippet client instance.
-      address: address of target device.
-      secure: whether encryption is required.
-      uuid: UUID of the RFCOMM channel.
-
-    Returns:
-      A coroutine that will return the RFCOMM client wrapper instance.
-    """
-    return cls(
-        snippet=snippet,
-        cookie=snippet.rfcommConnectWithUuid(address, secure, uuid, False),
-    )
+  def is_connected(self) -> bool:
+    """Checks if the socket is connected."""
+    return self.snippet.socketIsConnected(self.cookie)
 
   async def wait_for_connected(
       self,
@@ -2502,93 +2621,147 @@ class RfcommChannel:
           seconds=_DEFAULT_CONNECTION_TIMEOUT_SECONDS
       ),
   ) -> None:
-    """Waits for async connection to complete.
-
-    Args:
-      timeout: Timeout for connection to complete, default is 10 seconds.
-
-    Raises:
-      ConnectionError: RFCOMM is not connected as expected.
-    """
+    """Waits for async connection to complete."""
     try:
       await asyncio.to_thread(
-          self.snippet.rfcommWaitForConnectionComplete,
+          self.snippet.socketWaitForConnectionComplete,
           self.cookie,
           int(timeout.total_seconds() * 1000),
       )
     except mobly.snippet.errors.ApiError as e:
-      raise errors.ConnectionError('Unable to connect RFCOMM') from e
+      raise errors.ConnectionError(
+          f'Unable to connect socket {self.socket_type}'
+      ) from e
 
-  async def close(self) -> None:
-    """Closes the RFCOMM channel."""
-    await asyncio.to_thread(self.snippet.rfcommDisconnect, self.cookie)
+  async def __aenter__(self) -> Self:
+    return self
 
-  async def read(self, length: int | None = None) -> bytes:
-    """Reads data from the RFCOMM channel.
-
-    If `length` is provided, the data will be read until the length is reached.
-    Otherwise, only one read call will be performed for at most 65535 bytes.
-
-    Args:
-      length: Length of data to read.
-
-    Returns:
-      Read data.
-    """
-    return base64.b64decode(
-        await asyncio.to_thread(self.snippet.rfcommRead, self.cookie, length)
-    )
-
-  async def write(self, data: bytes) -> None:
-    """Writes data to the RFCOMM channel.
-
-    Args:
-      data: Data to write.
-    """
-    await asyncio.to_thread(
-        self.snippet.rfcommWrite, self.cookie, base64.b64encode(data).decode()
-    )
+  async def __aexit__(
+      self, exc_type: Any, exc_value: Any, traceback: Any
+  ) -> None:
+    await self.close()
 
 
 @dataclasses.dataclass
-class RfcommServer:
-  """RFCOMM server wrapper."""
+class L2capSocket(BluetoothSocket):
+  """L2CAP client socket."""
 
-  _AUTO_ALLOCATE_PSM: ClassVar[int] = -2
-
-  snippet: snippet_stub.BluetoothSnippet
-  uuid: str
+  psm: int | None = None
 
   @classmethod
-  def create(
-      cls: Type[Self],
+  async def connect(
+      cls,
       snippet: snippet_stub.BluetoothSnippet,
+      address: str,
+      secure: bool,
+      psm: int,
+      address_type: android_constants.AddressTypeStatus = android_constants.AddressTypeStatus.RANDOM,
+      transport: android_constants.Transport = android_constants.Transport.LE,
+      retry_count: int = _DEFAULT_RETRY_COUNT,
+  ) -> L2capSocket:
+    """Connects to an L2CAP channel."""
+
+    @retry.retry_on_exception(
+        initial_delay_sec=_DEFAULT_RETRY_DELAY_SECONDS,
+        num_retries=retry_count,
+    )
+    async def inner() -> L2capSocket:
+      try:
+        cookie = await asyncio.to_thread(
+            snippet.l2capConnect,
+            address,
+            secure,
+            psm,
+            address_type,
+            transport,
+            True,
+        )
+        if transport == android_constants.Transport.CLASSIC:
+          s_type = android_constants.BluetoothSocketType.L2CAP
+        else:
+          s_type = android_constants.BluetoothSocketType.LE
+        return cls(snippet=snippet, cookie=cookie, socket_type=s_type, psm=psm)
+      except mobly.snippet.errors.ApiError as e:
+        raise errors.ConnectionError(
+            f'Unable to connect L2CAP to {address} with PSM {psm}'
+        ) from e
+
+    return await inner()
+
+  @classmethod
+  def connect_async(
+      cls,
+      snippet: snippet_stub.BluetoothSnippet,
+      address: str,
+      secure: bool,
+      psm: int,
+      address_type: android_constants.AddressTypeStatus = android_constants.AddressTypeStatus.RANDOM,
+      transport: android_constants.Transport = android_constants.Transport.LE,
+  ) -> L2capSocket:
+    """Connects to an L2CAP channel asynchronously."""
+    cookie = snippet.l2capConnect(
+        address, secure, psm, address_type, transport, False
+    )
+    if transport == android_constants.Transport.CLASSIC:
+      s_type = android_constants.BluetoothSocketType.L2CAP
+    else:
+      s_type = android_constants.BluetoothSocketType.LE
+    return cls(snippet=snippet, cookie=cookie, socket_type=s_type, psm=psm)
+
+
+@dataclasses.dataclass
+class RfcommSocket(BluetoothSocket):
+  """RFCOMM client socket."""
+
+  uuid: str | None = None
+
+  @classmethod
+  async def connect(
+      cls,
+      snippet: snippet_stub.BluetoothSnippet,
+      address: str,
       secure: bool,
       uuid: str,
-  ) -> Self:
-    """Opens an RFCOMM server.
+      retry_count: int = _DEFAULT_RETRY_COUNT,
+  ) -> RfcommSocket:
+    """Connects to an RFCOMM channel."""
 
-    Args:
-      snippet: Snippet client instance.
-      secure: Whether encryption is required.
-      uuid: RFCOMM Service Record UUID.
-
-    Returns:
-      Created RFCOMM server wrapper.
-    """
-    snippet.rfcommOpenServer(secure, uuid)
-    return cls(snippet=snippet, uuid=uuid)
-
-  def close(self) -> None:
-    """Closes the RFCOMM server."""
-    self.snippet.rfcommCloseServer(self.uuid)
-
-  async def accept(self) -> RfcommChannel:
-    """Accepts a connection from the RFCOMM server."""
-    cookie = await asyncio.to_thread(
-        self.snippet.rfcommWaitConnection, self.uuid
+    @retry.retry_on_exception(
+        initial_delay_sec=_DEFAULT_RETRY_DELAY_SECONDS,
+        num_retries=retry_count,
     )
-    return RfcommChannel(snippet=self.snippet, cookie=cookie)
+    async def inner() -> RfcommSocket:
+      try:
+        cookie = await asyncio.to_thread(
+            snippet.rfcommConnect, address, secure, uuid, True
+        )
+        return cls(
+            snippet=snippet,
+            cookie=cookie,
+            socket_type=android_constants.BluetoothSocketType.RFCOMM,
+            uuid=uuid,
+        )
+      except mobly.snippet.errors.ApiError as e:
+        raise errors.ConnectionError('Unable to connect RFCOMM') from e
+
+    return await inner()
+
+  @classmethod
+  def connect_async(
+      cls,
+      snippet: snippet_stub.BluetoothSnippet,
+      address: str,
+      secure: bool,
+      uuid: str,
+  ) -> RfcommSocket:
+    """Connects to an RFCOMM channel asynchronously."""
+    cookie = snippet.rfcommConnect(address, secure, uuid, False)
+    return cls(
+        snippet=snippet,
+        cookie=cookie,
+        socket_type=android_constants.BluetoothSocketType.RFCOMM,
+        uuid=uuid,
+    )
 
 
 @dataclasses.dataclass
@@ -3324,8 +3497,8 @@ class SnippetWrapper:
   def create_l2cap_server(
       self,
       secure: bool,
-      psm: int = L2capServer.AUTO_ALLOCATE_PSM,
-  ) -> L2capServer:
+      psm: int = L2capServerSocket.AUTO_ALLOCATE_PSM,
+  ) -> L2capServerSocket:
     """Creates an L2CAP server.
 
     Args:
@@ -3335,7 +3508,7 @@ class SnippetWrapper:
     Returns:
       The L2CAP server control block.
     """
-    return L2capServer.create(self.snippet, secure, psm)
+    return L2capServerSocket.listen(self.snippet, secure, psm)
 
   async def create_l2cap_channel(
       self,
@@ -3344,7 +3517,7 @@ class SnippetWrapper:
       psm: int,
       address_type: android_constants.AddressTypeStatus = android_constants.AddressTypeStatus.RANDOM,
       retry_count: int = _DEFAULT_RETRY_COUNT,
-  ) -> L2capChannel:
+  ) -> L2capSocket:
     """Creates an L2CAP channel.
 
     Args:
@@ -3357,16 +3530,76 @@ class SnippetWrapper:
     Returns:
       The L2CAP channel control block.
     """
-    return await L2capChannel.connect(
+    return await L2capSocket.connect(
         self.snippet,
         address,
         secure,
         psm,
         address_type,
-        retry_count,
+        retry_count=retry_count,
     )
 
-  def create_rfcomm_server(self, uuid: str, secure: bool) -> RfcommServer:
+  def create_l2cap_channel_async(
+      self,
+      address: str,
+      secure: bool,
+      psm: int,
+      address_type: android_constants.AddressTypeStatus = android_constants.AddressTypeStatus.RANDOM,
+      transport: android_constants.Transport = android_constants.Transport.LE,
+  ) -> L2capSocket:
+    """Creates an L2CAP channel asynchronously.
+
+    Args:
+      address: Address of target device.
+      secure: Whether encryption is required.
+      psm: L2CAP channel number.
+      address_type: Address type of target device.
+      transport: Transport to use.
+
+    Returns:
+      The L2CAP channel control block.
+    """
+    return L2capSocket.connect_async(
+        self.snippet, address, secure, psm, address_type, transport
+    )
+
+  async def create_socket_with_settings(
+      self,
+      address: str,
+      settings: BluetoothSocketSettings,
+      address_type: android_constants.AddressTypeStatus = android_constants.AddressTypeStatus.RANDOM,
+      retry_count: int = _DEFAULT_RETRY_COUNT,
+  ) -> BluetoothSocket:
+    """Creates a socket using settings.
+
+    Args:
+      address: Address of target device.
+      settings: Socket settings to use.
+      address_type: Address type of target device.
+      retry_count: Allowed retry count of connect attempts.
+
+    Returns:
+      The channel control block.
+    """
+    return await BluetoothSocket.connect_with_settings(
+        self.snippet, address, settings, address_type, retry_count
+    )
+
+  def create_server_socket_with_settings(
+      self,
+      settings: BluetoothSocketSettings,
+  ) -> BluetoothServerSocket:
+    """Creates a server socket using settings.
+
+    Args:
+      settings: Socket settings to use.
+
+    Returns:
+      The server socket control block.
+    """
+    return BluetoothServerSocket.listen_with_settings(self.snippet, settings)
+
+  def create_rfcomm_server(self, uuid: str, secure: bool) -> RfcommServerSocket:
     """Creates an RFCOMM server.
 
     Args:
@@ -3376,7 +3609,7 @@ class SnippetWrapper:
     Returns:
       The RFCOMM server control block.
     """
-    return RfcommServer.create(self.snippet, secure, uuid)
+    return RfcommServerSocket.listen(self.snippet, secure, uuid)
 
   async def create_rfcomm_channel(
       self,
@@ -3384,7 +3617,7 @@ class SnippetWrapper:
       secure: bool,
       uuid: str,
       retry_count: int = _DEFAULT_RETRY_COUNT,
-  ) -> RfcommChannel:
+  ) -> RfcommSocket:
     """Creates an RFCOMM channel.
 
     Args:
@@ -3396,7 +3629,7 @@ class SnippetWrapper:
     Returns:
       The RFCOMM channel control block.
     """
-    return await RfcommChannel.connect(
+    return await RfcommSocket.connect(
         self.snippet, address, secure, uuid, retry_count
     )
 
@@ -3405,7 +3638,7 @@ class SnippetWrapper:
       address: str,
       secure: bool,
       uuid: str,
-  ) -> RfcommChannel:
+  ) -> RfcommSocket:
     """Creates an RFCOMM channel.
 
     Args:
@@ -3416,7 +3649,7 @@ class SnippetWrapper:
     Returns:
       The RFCOMM channel control block.
     """
-    return RfcommChannel.connect_async(self.snippet, address, secure, uuid)
+    return RfcommSocket.connect_async(self.snippet, address, secure, uuid)
 
   async def start_legacy_advertiser(
       self,
@@ -3638,7 +3871,7 @@ class SnippetWrapper:
     return CallbackHandler(
         snippet=self.snippet,
         handler=self.snippet.registerHidDeviceApp(sdp_settings),
-        on_close=self.snippet.unregisterHidDeviceApp,
+        on_close=lambda _: self.snippet.unregisterHidDeviceApp(),
     )
 
   def register_media_library_session(

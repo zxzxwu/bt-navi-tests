@@ -17,13 +17,14 @@
 import abc
 import asyncio
 import collections
-from collections.abc import AsyncGenerator, Callable, Coroutine, Sequence
+from collections.abc import AsyncGenerator, Callable, Coroutine, Iterator, Sequence
 import contextlib
 import dataclasses
 import enum
 import functools
 import importlib
 import inspect
+import json
 import logging
 import pathlib
 import re
@@ -39,6 +40,7 @@ import bumble.core
 import bumble.device
 import bumble.hci
 from mobly import base_test
+from mobly import expects
 from mobly import records
 from mobly import runtime_test_info
 from mobly import signals
@@ -69,6 +71,7 @@ _DEFAULT_ADVERTISING_INTERVAL = 100
 RECORD_FULL_DATA = "record_full_data"
 DUMP_CROWN_LOG_ON_FAIL = "dump_crown_log_on_fail"
 CUSTOM_TEST_SESSION = "custom_test_session"
+PROPERTY_OVERRIDES = "property_overrides"
 _DEFAULT_STEP_TIMEOUT_SECONDS = 10.0
 
 _FUNC = TypeVar("_FUNC", bound=Callable[..., Any])
@@ -883,6 +886,24 @@ class BaseTestBase(base_test.BaseTestClass, absltest.TestCase):
       return
     raise self.failureException(self._formatMessage(msg, "Timeout not reached"))
 
+  @override
+  @contextlib.contextmanager
+  def subTest(self, msg: str | None = None, **kwargs: Any) -> Iterator[None]:
+    """Provides a context manager to run subtests.
+
+    This implementation wraps `mobly.expects.expect_no_raises` to provide
+    `unittest.subTest`-like behavior in a Mobly environment.
+
+    Args:
+      msg: A description of the subtest.
+      **kwargs: Additional keyword arguments for the subtest.
+    """
+    del self  # Unused.
+    with expects.expect_no_raises(
+        message=f"SubTest {msg} failed" if msg else None, extras=kwargs
+    ):
+      yield
+
 
 class AndroidBumbleTestBase(BaseTestBase):
   """Base class for Bluetooth tests containing 1 Android and 0 or more Bumble device."""
@@ -917,6 +938,8 @@ class AndroidBumbleTestBase(BaseTestBase):
           eatt_enabled=True,
           # Set a random IRK.
           irk=secrets.token_bytes(16),
+          # Set a default class of device of UNCATEGORIZED.
+          class_of_device=0x1F00,
           # Set a random static address.
           address=bumble.hci.Address.generate_static_address(),
           # Set a default advertising interval.
@@ -948,7 +971,13 @@ class AndroidBumbleTestBase(BaseTestBase):
       case CrownDriver.CF_ROOTCANAL:
         controllers = self._get_android_controllers(1)
         self.dut = self.dut_wrapper_factory(controllers[0])
-        netsim_port = int(self.dut.adb.forward(["tcp:0", "vsock:2:7300"]))
+        serial = self.dut.getprop("ro.serialno")
+        match = re.fullmatch(r"CUTTLEFISHCVD(\d+)", serial) if serial else None
+        instance_num = int(match.group(1)) if match else 1
+        vsock_port = 7300 + instance_num - 1
+        netsim_port = int(
+            self.dut.adb.forward(["tcp:0", f"vsock:2:{vsock_port}"])
+        )
         self.test_class_context.callback(
             lambda: self.dut.adb.forward(["--remove", f"tcp:{netsim_port}"])
         )
@@ -961,6 +990,15 @@ class AndroidBumbleTestBase(BaseTestBase):
         ]
       case _:
         raise ValueError("Unsupported Crown driver")
+
+    if property_overrides := self.user_params.get(PROPERTY_OVERRIDES, {}):
+      if isinstance(property_overrides, str):
+        property_overrides = json.loads(property_overrides)
+      else:
+        property_overrides = dict(property_overrides)
+      for key, value in property_overrides.items():
+        if self.dut.getprop(key) != value:
+          self.setprop_for_class_context(key, value)
 
     # Register logcat forwarding service for DUT.
     logcat.LogcatForwardingService.register(
@@ -1126,7 +1164,13 @@ class AndroidBumbleTestBase(BaseTestBase):
   @override
   async def async_teardown_test(self) -> None:
     # Collect logcat.
-    self.dut.device.services.create_output_excerpts_all(self.current_test_info)
+    await asyncio.to_thread(
+        lambda: self.dut.device.services.create_output_excerpts_all(
+            self.current_test_info
+        )
+    )
+    # Collect btsnoop and dumpsys logs.
+    await asyncio.to_thread(self._get_btsnoop_and_dumpsys)
     # Close test case log handler.
     if self.test_case_log_handler is not None:
       self.test_case_log_handler.close()
@@ -1137,13 +1181,11 @@ class AndroidBumbleTestBase(BaseTestBase):
 
   @override
   def on_fail(self, record: records.TestResultRecord) -> None:
-    self._get_btsnoop_and_dumpsys()
     self._get_test_script()
 
   @override
   def on_pass(self, record: records.TestResultRecord) -> None:
     if self.user_params.get(RECORD_FULL_DATA):
-      self._get_btsnoop_and_dumpsys()
       self._get_test_script()
 
   @override

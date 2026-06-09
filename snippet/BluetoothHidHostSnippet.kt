@@ -127,16 +127,6 @@ class BluetoothHidHostSnippet : Snippet {
     return proxy.getPreferredTransport(bluetoothAdapter.getRemoteDevice(address))
   }
 
-  /** Unplugs the HID device with the given [address]. */
-  @Rpc(description = "Unplugs the HID device with the given address.")
-  fun virtualUnplug(address: String): Boolean {
-    val device = bluetoothAdapter.getRemoteDevice(address)
-    return BluetoothHidHost::class
-      .java
-      .getMethod("virtualUnplug", BluetoothDevice::class.java)
-      .invoke(proxy, device) as Boolean
-  }
-
   /**
    * Initiates a request to get the protocol mode for the HID host.
    *

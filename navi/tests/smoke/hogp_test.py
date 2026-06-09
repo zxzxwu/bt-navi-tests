@@ -14,11 +14,16 @@
 
 """Tests for HID over GATT Profile(GATT) implementation on Android."""
 
+import asyncio
 import contextlib
 import struct
+from unittest import mock
 
+from bumble import att
+from bumble import core
 from bumble import gatt
 from bumble import hci
+from bumble import pairing
 from mobly import test_runner
 from mobly import signals
 from typing_extensions import override
@@ -319,6 +324,154 @@ class HogpTest(navi_test_base.TwoDevicesTestBase):
     self.logger.info("[DUT] Wait for hover movement")
     async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
       await input_monitor.wait_for_event(["EV_REL", " REL_Y"])
+
+  async def test_set_preferred_transport(self) -> None:
+    """Tests setting the preferred transport for HID Host.
+
+    Test steps:
+      1. Establish the HID connection over Classic.
+      2. Set the preferred transport to LE.
+      3. Verify the transport switch to LE.
+    """
+    self._setup_hid_service()
+
+    ref_classic_hid_device = hid.Device(self.ref.device, delegate=None)
+    self.ref.device.sdp_service_records = {
+        1: hid.make_device_sdp_record(1, hid.DEFAULT_REPORT_MAP)
+    }
+    condition = asyncio.Condition()
+    mouse_characteristic_subscribers: list[att.Bearer | None] = [None]
+
+    @ref_classic_hid_device.on(hid.Device.EVENT_CONNECTION)
+    @ref_classic_hid_device.on(hid.Device.EVENT_DISCONNECTION)
+    async def on_ref_hid_connection_state_changed() -> None:
+      async with condition:
+        condition.notify_all()
+
+    @self.ref_mouse_input_report_characteristic.on(
+        gatt.Characteristic.EVENT_SUBSCRIPTION
+    )
+    async def on_ref_hid_control_channel_state_changed(
+        bearer: att.Bearer, notify_enabled: bool, indicate_enabled: bool
+    ) -> None:
+      del notify_enabled, indicate_enabled
+      async with condition:
+        mouse_characteristic_subscribers[0] = bearer
+        condition.notify_all()
+
+    with (
+        self.dut.bl4a.register_callback(bl4a_api.Module.HID_HOST) as dut_hid_cb,
+        self.dut.bl4a.register_callback(bl4a_api.Module.ADAPTER) as adapter_cb,
+    ):
+      self.logger.info("[DUT] Pair and connect LE")
+      key_distribution = (
+          pairing.PairingDelegate.KeyDistribution.DISTRIBUTE_ENCRYPTION_KEY
+          | pairing.PairingDelegate.KeyDistribution.DISTRIBUTE_IDENTITY_KEY
+          | pairing.PairingDelegate.KeyDistribution.DISTRIBUTE_LINK_KEY
+      )
+      await self.le_connect_and_pair(
+          hci.OwnAddressType.PUBLIC,
+          connect_profiles=False,
+          delegate=pairing.PairingDelegate(
+              io_capability=pairing.PairingDelegate.IoCapability.DISPLAY_OUTPUT_AND_KEYBOARD_INPUT,
+              local_initiator_key_distribution=key_distribution,
+              local_responder_key_distribution=key_distribution,
+          ),
+      )
+      self.logger.info("[DUT] Wait for HID service discovered")
+      discovered_uuids = set[core.UUID]()
+      while not discovered_uuids.issuperset({
+          core.BT_HUMAN_INTERFACE_DEVICE_SERVICE,
+          gatt.GATT_HUMAN_INTERFACE_DEVICE_SERVICE,
+      }):
+        uuid_changed_event = await adapter_cb.wait_for_event(
+            bl4a_api.UuidChanged(address=self.ref.address, uuids=mock.ANY)
+        )
+        discovered_uuids.update(map(core.UUID, uuid_changed_event.uuids or []))
+        self.logger.info("[DUT] uuids: %r", discovered_uuids)
+
+      self.logger.info("[DUT] Connect to REF")
+      self.dut.bt.connect(self.ref.address)
+
+      self.logger.info("[DUT] Wait for HID connected over Classic")
+      await dut_hid_cb.wait_for_event(
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.CONNECTED,
+          ),
+      )
+
+      initial_transport = self.dut.bt.getHidHostPreferredTransport(
+          self.ref.address
+      )
+      self.logger.info(
+          "[DUT] Initial preferred transport: %s", initial_transport
+      )
+      self.assertEqual(
+          initial_transport,
+          android_constants.Transport.CLASSIC,
+          msg="Initial preferred transport should be CLASSIC",
+      )
+      async with (
+          self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS),
+          condition,
+      ):
+        self.logger.info("[REF] Wait for HID connected over Classic")
+        await condition.wait_for(
+            lambda: ref_classic_hid_device.control_channel is not None
+        )
+
+      self.logger.info("[DUT] Set preferred transport to LE")
+      self.assertTrue(
+          self.dut.bt.setHidHostPreferredTransport(
+              self.ref.address, android_constants.Transport.LE
+          ),
+          msg="Failed to set preferred transport to LE",
+      )
+
+      updated_transport = self.dut.bt.getHidHostPreferredTransport(
+          self.ref.address
+      )
+      self.logger.info(
+          "[DUT] Updated preferred transport: %s", updated_transport
+      )
+      self.assertEqual(
+          updated_transport,
+          android_constants.Transport.LE,
+          msg="Updated preferred transport should be LE",
+      )
+
+      self.logger.info("[DUT] Wait for transport switch (DISCONNECTED Classic)")
+      await dut_hid_cb.wait_for_event(
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.DISCONNECTED,
+          ),
+      )
+      async with (
+          self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS),
+          condition,
+      ):
+        self.logger.info("[REF] Wait for HID disconnected over Classic")
+        await condition.wait_for(
+            lambda: ref_classic_hid_device.control_channel is None
+        )
+
+      self.logger.info("[DUT] Wait for transport switch (CONNECTED LE)")
+      await dut_hid_cb.wait_for_event(
+          bl4a_api.ProfileConnectionStateChanged(
+              address=self.ref.address,
+              state=android_constants.ConnectionState.CONNECTED,
+          ),
+      )
+      async with (
+          self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS),
+          condition,
+      ):
+        self.logger.info("[REF] Wait for HID connected over LE")
+        await condition.wait_for(
+            lambda: mouse_characteristic_subscribers[0] is not None
+        )
 
 
 if __name__ == "__main__":

@@ -29,6 +29,9 @@ class InCallServiceImpl : InCallService() {
   interface Callback {
     /** Callback invoked whenever a call state is changed, including any call added. */
     fun onCallStateChanged(call: Call, state: Int)
+
+    /** Callback invoked when a call is removed. */
+    fun onCallRemoved(call: Call)
   }
 
   /** Local Binder used to get a reference to InCallServiceImpl. */
@@ -41,6 +44,9 @@ class InCallServiceImpl : InCallService() {
   /** Notifies the call state to all registered callbacks. */
   internal fun notifyCallState(call: Call, state: Int) =
     callbacks.values.forEach { it.onCallStateChanged(call, state) }
+
+  /** Notifies the call removal to all registered callbacks. */
+  internal fun notifyCallRemoved(call: Call) = callbacks.values.forEach { it.onCallRemoved(call) }
 
   override fun onBind(intent: Intent): IBinder? {
     Log.i(TAG, "InCallService bound.")
@@ -61,6 +67,11 @@ class InCallServiceImpl : InCallService() {
 
     // Notify the initial state because `registerCallback` doesn't spawn it.
     notifyCallState(call, call.details.state)
+  }
+
+  override fun onCallRemoved(call: Call) {
+    Log.i(TAG, "Call removed: $call")
+    notifyCallRemoved(call)
   }
 
   companion object {

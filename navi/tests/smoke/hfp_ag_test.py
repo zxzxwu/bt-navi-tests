@@ -104,6 +104,12 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
     if self.dut.getprop(android_constants.Property.HFP_AG_ENABLED) != "true":
       raise signals.TestAbortClass("HFP(AG) is not enabled on DUT.")
 
+    self.logger.info("[DUT] Disable all notifications.")
+    self.dut.shell("cmd notification set_dnd on")
+    self.test_class_context.callback(
+        lambda: self.dut.shell("cmd notification set_dnd off")
+    )
+
     self.logger.info("[DUT] Disable all other voice command apps.")
     voice_command_packages: set[str] = set(
         re.findall(
@@ -200,8 +206,18 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
     with self.dut.bl4a.register_callback(_Module.HFP_AG) as ag_cb:
       await self.test_pair_and_connect()
 
+      self.logger.info("[DUT] Wait for HFP connected.")
+      await ag_cb.wait_for_event(
+          bl4a_api.ProfileActiveDeviceChanged(address=self.ref.address),
+      )
+
       await self.disconnect_with_check(
           self.ref.address, android_constants.Transport.CLASSIC
+      )
+
+      self.logger.info("[DUT] Wait for HFP disconnected.")
+      await ag_cb.wait_for_event(
+          bl4a_api.ProfileActiveDeviceChanged(address=None),
       )
 
       self.logger.info("[DUT] Reconnect.")
@@ -236,8 +252,18 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
 
     await self.test_pair_and_connect()
 
+    self.logger.info("[DUT] Wait for HFP connected.")
+    await dut_cb.wait_for_event(
+        bl4a_api.ProfileActiveDeviceChanged(address=self.ref.address),
+    )
+
     await self.disconnect_with_check(
         self.ref.address, android_constants.Transport.CLASSIC
+    )
+
+    self.logger.info("[DUT] Wait for HFP disconnected.")
+    await dut_cb.wait_for_event(
+        bl4a_api.ProfileActiveDeviceChanged(address=None),
     )
 
     self.logger.info("[REF] Reconnect.")
@@ -293,9 +319,13 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
       2. Discover SDP records from REF.
       3. Verify SDP records.
     """
-    ref_acl_connection = await self.classic_connect_and_pair(
-        connect_profiles=False
+    await self.test_pair_and_connect()
+    ref_acl_connection = self.ref.device.find_connection_by_bd_addr(
+        hci.Address(self.dut.address),
+        transport=core.PhysicalTransport.BR_EDR,
     )
+    if not ref_acl_connection:
+      self.fail("No ACL connection found.")
 
     self.logger.info("[REF] Discover SDP records.")
     async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
@@ -1422,6 +1452,104 @@ class HfpAgTest(navi_test_base.TwoDevicesTestBase):
     await ag_cb.wait_for_event(
         _HfpAgAudioStateChange(
             address=self.ref.address, state=_ScoState.DISCONNECTED
+        )
+    )
+
+  async def test_switch_call_endpoint(self) -> None:
+    """Tests switching call endpoint.
+
+    Test steps:
+      1. Setup HFP connection.
+      2. Place a call.
+      3. Switch call endpoint from SCO to Speaker.
+      4. Switch call endpoint from Speaker to SCO.
+    """
+    if (
+        self.dut.device.is_emulator
+        and self.dut.getprop(android_constants.Property.SCO_MANAGED_BY_AUDIO)
+        != "true"
+    ):
+      self.skipTest(
+          "SCO endpoint switch is not supported with non-AMSCO emulator"
+      )
+
+    self.logger.info("[REF] Setup HFP server.")
+    hfp_ext.HfProtocol.setup_server(
+        self.ref.device,
+        sdp_handle=_HFP_SDP_HANDLE,
+        configuration=hfp_ext.make_hf_configuration(),
+    )
+
+    ag_cb = self.dut.bl4a.register_callback(_Module.HFP_AG)
+    self.test_case_context.push(ag_cb)
+
+    await self.classic_connect_and_pair(connect_profiles=True)
+
+    self.logger.info("[DUT] Wait for HFP connected.")
+    await ag_cb.wait_for_event(
+        bl4a_api.ProfileActiveDeviceChanged(address=self.ref.address)
+    )
+
+    telecom_cb = self.dut.bl4a.register_callback(_Module.TELECOM)
+    self.test_case_context.push(telecom_cb)
+
+    self.logger.info("[DUT] Make outgoing call.")
+    call = self.dut.bl4a.make_phone_call(
+        _CALLER_NAME,
+        _CALLER_NUMBER,
+        constants.Direction.OUTGOING,
+    )
+    self.test_case_context.push(call)
+
+    self.logger.info("[DUT] Set repeat mode to one.")
+    self.dut.bt.audioSetRepeat(android_constants.RepeatMode.ONE)
+
+    self.logger.info("[DUT] Set audio attributes for voice communication.")
+    self.dut.bl4a.set_audio_attributes(
+        bl4a_api.AudioAttributes(
+            content_type=bl4a_api.AudioAttributes.ContentType.SPEECH,
+            usage=bl4a_api.AudioAttributes.Usage.VOICE_COMMUNICATION,
+        ),
+        handle_audio_focus=False,
+    )
+
+    self.logger.info("[DUT] Play sine wave.")
+    self.dut.bt.audioPlaySine()
+
+    self.logger.info("[DUT] Wait for SCO connected.")
+    await ag_cb.wait_for_event(
+        _HfpAgAudioStateChange(
+            address=self.ref.address, state=_ScoState.CONNECTED
+        )
+    )
+
+    self.logger.info("[DUT] Wait for 1 second.")
+    await asyncio.sleep(1.0)
+
+    self.logger.info("[DUT] Switch call endpoint to SPEAKER.")
+    await call.request_call_endpoint_switch(
+        android_constants.CallEndpointType.SPEAKER
+    )
+
+    self.logger.info("[DUT] Wait for SCO disconnected.")
+    await ag_cb.wait_for_event(
+        _HfpAgAudioStateChange(
+            address=self.ref.address, state=_ScoState.DISCONNECTED
+        )
+    )
+
+    self.logger.info("[DUT] Wait for 1 second.")
+    await asyncio.sleep(1.0)
+
+    self.logger.info("[DUT] Switch call endpoint to SCO.")
+    await call.request_call_endpoint_switch(
+        android_constants.CallEndpointType.BLUETOOTH
+    )
+
+    self.logger.info("[DUT] Wait for SCO connected.")
+    await ag_cb.wait_for_event(
+        _HfpAgAudioStateChange(
+            address=self.ref.address, state=_ScoState.CONNECTED
         )
     )
 

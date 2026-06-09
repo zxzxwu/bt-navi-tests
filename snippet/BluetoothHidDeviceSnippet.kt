@@ -42,6 +42,13 @@ class BluetoothHidDeviceSnippet : Snippet {
   fun registerHidDeviceApp(callbackId: String, sdpSettings: BluetoothHidDeviceAppSdpSettings) {
     val callback =
       object : BluetoothHidDevice.Callback() {
+        override fun onAppStatusChanged(device: BluetoothDevice?, registered: Boolean) {
+          Utils.postSnippetEvent(callbackId, SnippetConstants.HID_DEVICE_APP_STATUS_CHANGED) {
+            putString(SnippetConstants.FIELD_DEVICE, device?.address)
+            putBoolean(SnippetConstants.FIELD_STATE, registered)
+          }
+        }
+
         override fun onConnectionStateChanged(device: BluetoothDevice, state: Int) {
           Utils.postSnippetEvent(callbackId, SnippetConstants.PROFILE_CONNECTION_STATE_CHANGE) {
             putString(SnippetConstants.FIELD_DEVICE, device.address)

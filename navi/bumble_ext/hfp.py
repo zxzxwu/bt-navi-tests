@@ -18,7 +18,7 @@ import asyncio
 from collections.abc import Iterable, Sequence
 import dataclasses
 import logging
-from typing import Self
+from typing import Literal, Self, overload
 
 from bumble import core
 from bumble import device as device_lib
@@ -539,6 +539,50 @@ class HfProtocol(hfp.HfProtocol):
   async def initiate_slc(self) -> None:
     await super().initiate_slc()
     self.slc_initialized.set()
+
+  @overload
+  @override
+  async def execute_command(
+      self,
+      cmd: str,
+      timeout: float = 10.0,
+      *,
+      response_type: Literal[hfp.AtResponseType.NONE] = hfp.AtResponseType.NONE,
+  ) -> None:
+    ...
+
+  @overload
+  @override
+  async def execute_command(
+      self,
+      cmd: str,
+      timeout: float = 10.0,
+      *,
+      response_type: Literal[hfp.AtResponseType.SINGLE],
+  ) -> hfp.AtResponse:
+    ...
+
+  @overload
+  @override
+  async def execute_command(
+      self,
+      cmd: str,
+      timeout: float = 10.0,
+      *,
+      response_type: Literal[hfp.AtResponseType.MULTIPLE],
+  ) -> list[hfp.AtResponse]:
+    ...
+
+  @override
+  async def execute_command(
+      self,
+      cmd: str,
+      timeout: float = 10.0,
+      response_type: hfp.AtResponseType = hfp.AtResponseType.NONE,
+  ) -> None | hfp.AtResponse | list[hfp.AtResponse]:
+    return await super().execute_command(
+        cmd, timeout=timeout, response_type=response_type  # type: ignore[call-overload]
+    )
 
   @override
   async def setup_codec_connection(self, codec_id: int) -> None:

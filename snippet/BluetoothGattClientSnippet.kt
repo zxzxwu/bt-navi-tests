@@ -202,7 +202,7 @@ class BluetoothGattClientSnippet : Snippet {
    * Reconnects a GATT client instance of [cookie], and returns true if the connection attempt was
    * initiated successfully.
    */
-  @Rpc(description = "Disconnect a GATT connection")
+  @Rpc(description = "Reconnects a GATT connection")
   fun gattReconnect(cookie: String): Boolean {
     return gattClients[cookie]?.connect()
       ?: throw IllegalArgumentException("GATT client $cookie not found")
@@ -237,7 +237,7 @@ class BluetoothGattClientSnippet : Snippet {
    * Reads from characteristic [characteristicHandle] on GATT client of [cookie], and returns true
    * if success, false if fail.
    */
-  @Rpc(description = "Writes a characteristic value")
+  @Rpc(description = "Reads a characteristic value")
   fun gattReadCharacteristic(cookie: String, characteristicHandle: Int): Boolean {
     val client =
       gattClients[cookie] ?: throw IllegalArgumentException("Client $cookie doesn't exist!")
@@ -275,7 +275,7 @@ class BluetoothGattClientSnippet : Snippet {
    * Continuously writes [value] in segmentations to characteristic [characteristicHandle] on GATT
    * client of [cookie] until all bytes are sent.
    */
-  @Rpc(description = "Writes a characteristic value")
+  @Rpc(description = "Writes a characteristic with long value")
   fun gattWriteCharacteristicLong(
     cookie: String,
     characteristicHandle: Int,
@@ -328,7 +328,7 @@ class BluetoothGattClientSnippet : Snippet {
    * Writes [value] to [descriptorUuid] descriptor of characteristic in [characteristicHandle] on
    * GATT client of [cookie], and returns the status code.
    */
-  @Rpc(description = "Reads a characteristic descriptor")
+  @Rpc(description = "Writes a characteristic descriptor")
   fun gattWriteDescriptor(
     cookie: String,
     characteristicHandle: Int,
@@ -357,7 +357,7 @@ class BluetoothGattClientSnippet : Snippet {
   /**
    * Request MTU of GATT connection [cookie] to [mtu], and returns true if success, false otherwise.
    */
-  @Rpc(description = "Set Preferred phy of client")
+  @Rpc(description = "Requests MTU of client")
   fun gattRequestMtu(cookie: String, mtu: Int): Boolean {
     val client =
       gattClients[cookie] ?: throw IllegalArgumentException("Client $cookie doesn't exist!")

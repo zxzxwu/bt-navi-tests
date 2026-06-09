@@ -23,6 +23,7 @@ from bumble import core
 from mobly import test_runner
 
 from navi.bumble_ext import a2dp as a2dp_ext
+from navi.bumble_ext import avdtp as avdtp_ext
 from navi.bumble_ext import avrcp as avrcp_ext
 from navi.tests import navi_test_base
 from navi.tests.benchmark import performance_tool
@@ -70,14 +71,14 @@ class A2dpTest(test_base.PerformanceTestBase):
 
   def _setup_a2dp_device(
       self, codecs: list[_A2dpCodec]
-  ) -> tuple[avdtp.Listener, avrcp.Protocol]:
+  ) -> tuple[avdtp_ext.Listener, avrcp.Protocol]:
     """Sets up A2DP profile on REF.
 
     Args:
       codecs: A2DP codecs supported by REF.
 
     Returns:
-      A tuple of (avdtp.Listener, avrcp.Protocol).
+      A tuple of (avdtp_ext.Listener, avrcp.Protocol).
     """
     listener = a2dp_ext.setup_sink_server(
         self.ref.device,

@@ -57,11 +57,13 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.channels.trySendBlocking
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.timeout
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 
 /** Snippet related to Telecom. */
@@ -73,6 +75,7 @@ class TelecomSnippet : Snippet {
   private val callControls = mutableMapOf<String, CallControl>()
   private var inCallService: InCallServiceImpl
   private val telecomManager = context.getSystemService(TelecomManager::class.java)
+  private val availableCallEndpoints = MutableStateFlow<List<CallEndpoint>>(emptyList())
 
   init {
     instrumentation.uiAutomation.adoptShellPermissionIdentity()
@@ -114,6 +117,13 @@ class TelecomSnippet : Snippet {
             putString(SnippetConstants.FIELD_NAME, call.details.callerDisplayName)
             putString(SnippetConstants.FIELD_HANDLE, call.details.handle?.toString())
             putInt(SnippetConstants.FIELD_STATE, state)
+          }
+        }
+
+        override fun onCallRemoved(call: Call) {
+          postSnippetEvent(callbackId, SnippetConstants.CALL_REMOVED) {
+            putString(SnippetConstants.FIELD_NAME, call.details.callerDisplayName)
+            putString(SnippetConstants.FIELD_HANDLE, call.details.handle?.toString())
           }
         }
       }
@@ -174,7 +184,11 @@ class TelecomSnippet : Snippet {
         override fun onAvailableCallEndpointsChanged(
           availableEndpoints: MutableList<CallEndpoint>
         ) {
-          Log.i(TAG, "onAvailableCallEndpointsChanged cookie=$cookie")
+          Log.i(
+            TAG,
+            "onAvailableCallEndpointsChanged cookie=$cookie, endpoints=$availableEndpoints",
+          )
+          availableCallEndpoints.value = availableEndpoints
         }
 
         override fun onCallEndpointChanged(newCallEndpoint: CallEndpoint) {
@@ -239,6 +253,26 @@ class TelecomSnippet : Snippet {
       runBlocking { withTimeout(CALL_CONTROL_TIMEOUT) { deferred.await() } }
     } catch (e: TimeoutCancellationException) {
       throw RuntimeException("Disconnect call timeout after $CALL_CONTROL_TIMEOUT", e)
+    }
+  }
+
+  @Rpc(description = "Get active call endpoint")
+  fun requestCallEndpointSwitch(cookie: String, callEndpointType: Int) {
+    val endpoint = runBlocking {
+      withTimeoutOrNull(CALL_CONTROL_TIMEOUT) {
+          availableCallEndpoints.first { it.any { ep -> ep.endpointType == callEndpointType } }
+        }
+        ?.first { it.endpointType == callEndpointType }
+        ?: throw RuntimeException("No available call endpoints")
+    }
+
+    val deferred = DeferredOutcomeReceiver<Void?, CallException>()
+    callControls[cookie]?.requestCallEndpointChange(endpoint, context.mainExecutor, deferred)
+      ?: throw IllegalArgumentException("Call with $cookie doesn't exist!")
+    try {
+      runBlocking { withTimeout(CALL_CONTROL_TIMEOUT) { deferred.await() } }
+    } catch (e: TimeoutCancellationException) {
+      throw RuntimeException("Request call endpoint switch timeout after $CALL_CONTROL_TIMEOUT", e)
     }
   }
 
