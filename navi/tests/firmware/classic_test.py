@@ -28,7 +28,6 @@ from bumble import keys
 from bumble import pairing
 from mobly import test_runner
 
-from navi.bumble_ext import crown
 from navi.bumble_ext import hfp as hfp_ext
 from navi.tests import navi_test_base
 from navi.tests.firmware import test_base
@@ -121,10 +120,6 @@ class ClassicTest(test_base.DualDeviceTestBase):
   @override
   async def async_setup_class(self) -> None:
     await super().async_setup_class()
-    self.is_emulator = (
-        isinstance(self.dut.adapter, crown.AndroidCrownAdapter)
-        and self.dut.adapter.ad.is_emulator
-    )
     response = await self.dut.device.send_sync_command(
         hci.HCI_Read_Local_Supported_Codecs_Command()
     )

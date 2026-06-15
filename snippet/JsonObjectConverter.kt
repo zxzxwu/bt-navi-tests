@@ -24,6 +24,8 @@ import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothHidDeviceAppSdpSettings
 import android.bluetooth.BluetoothQualityReport
+import android.bluetooth.BluetoothSocket
+import android.bluetooth.BluetoothSocketSettings
 import android.bluetooth.OobData
 import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
@@ -474,6 +476,32 @@ class JsonObjectConverter : SnippetObjectConverter {
     return Utils.MediaNode(item, children)
   }
 
+  private fun JSONObject.toBluetoothSocketSettings(): BluetoothSocketSettings {
+    val builder =
+      BluetoothSocketSettings.Builder()
+        .setSocketType(
+          optInt(SnippetConstants.SOCKET_SETTINGS_SOCKET_TYPE, BluetoothSocket.TYPE_LE)
+        )
+        .setEncryptionRequired(
+          optBoolean(SnippetConstants.SOCKET_SETTINGS_ENCRYPTION_REQUIRED, false)
+        )
+        .setAuthenticationRequired(
+          optBoolean(SnippetConstants.SOCKET_SETTINGS_AUTHENTICATION_REQUIRED, false)
+        )
+    getOrNull<Int>(SnippetConstants.SOCKET_SETTINGS_L2CAP_PSM)?.let {
+      if (it > 0) {
+        val unused = builder.setL2capPsm(it)
+      }
+    }
+    getOrNull<String>(SnippetConstants.SOCKET_SETTINGS_RFCOMM_UUID)?.let {
+      val unused = builder.setRfcommUuid(UUID.fromString(it))
+    }
+    getOrNull<String>(SnippetConstants.SOCKET_SETTINGS_RFCOMM_SERVICE_NAME)?.let {
+      val unused = builder.setRfcommServiceName(it)
+    }
+    return builder.build()
+  }
+
   private fun JSONObject.toBluetoothCodecType(): BluetoothCodecType =
     BluetoothCodecType(
       getInt(SnippetConstants.CODEC_TYPE),
@@ -602,6 +630,9 @@ class JsonObjectConverter : SnippetObjectConverter {
     }
     if (type === BluetoothCodecConfig::class.java) {
       return jsonObject?.toBluetoothCodecConfig()
+    }
+    if (type === BluetoothSocketSettings::class.java) {
+      return jsonObject?.toBluetoothSocketSettings()
     }
     return null
   }

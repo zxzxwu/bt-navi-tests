@@ -25,6 +25,7 @@ from mobly import signals
 from typing_extensions import override
 
 from navi.bumble_ext import a2dp as a2dp_ext
+from navi.bumble_ext import avdtp as avdtp_ext
 from navi.tests import navi_test_base
 from navi.utils import android_constants
 from navi.utils import audio
@@ -39,7 +40,6 @@ _FLAG_A2DP_OFFLOAD_USER_CODEC_SELECTION = (
 )
 _PROPERTY_A2DP_OFFLOAD_SUPPORTED = "ro.bluetooth.a2dp_offload.supported"
 _PROPERTY_CODEC_PRIORITY = "bluetooth.a2dp.source.%s_priority.config"
-_PROPERTY_OPUS_ENABLED = "persist.bluetooth.opus.enabled"
 _PROPERTY_VND_AUDIO_A2DP_CODEC_EXTENSIBILITY = (
     "persist.vendor.audio.a2dp_codec_extensibility"
 )
@@ -64,7 +64,9 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
     ):
       raise signals.TestAbortClass("A2DP is not enabled on DUT.")
     if self.dut.device.is_emulator:
-      self.setprop_for_class_context(_PROPERTY_OPUS_ENABLED, "true")
+      self.setprop_for_class_context(
+          android_constants.Property.A2DP_SOURCE_OPUS_ENABLED, "true"
+      )
 
     self.dut_supported_codecs = [
         codec
@@ -76,7 +78,10 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
         > _VALUE_CODEC_DISABLED
         and (
             codec != _A2dpCodec.OPUS
-            or self.dut.getprop(_PROPERTY_OPUS_ENABLED) == "true"
+            or self.dut.getprop(
+                android_constants.Property.A2DP_SOURCE_OPUS_ENABLED
+            )
+            == "true"
         )
     ]
 
@@ -107,14 +112,14 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
         handle_audio_focus=False,
     )
 
-  def _setup_a2dp_device(self, codecs: list[_A2dpCodec]) -> avdtp.Listener:
+  def _setup_a2dp_device(self, codecs: list[_A2dpCodec]) -> avdtp_ext.Listener:
     """Set up A2DP profile on REF.
 
     Args:
       codecs: A2DP codecs supported by REF.
 
     Returns:
-      A avdtp.Listener.
+      A avdtp_ext.Listener.
     """
     listener = a2dp_ext.setup_sink_server(
         self.ref.device,
@@ -487,6 +492,156 @@ class A2dpTest(navi_test_base.TwoDevicesTestBase):
         # Dominant frequency is not accurate on emulator.
         if not self.dut.device.is_emulator:
           self.assertAlmostEqual(dominant_frequency, 1000, delta=10)
+
+  async def test_sbc_mono_streaming(self) -> None:
+    """Tests SBC Mono streaming.
+
+    Test steps:
+      1. Setup A2DP connection (negotiates default Joint Stereo).
+      2. Set codec config to SBC Mono.
+      3. Verify config changed to Mono.
+      4. Start stream.
+      5. Stop stream.
+      6. Verify dominant frequency.
+    """
+    preferred_codec = _A2dpCodec.SBC
+    if preferred_codec not in self.dut_supported_codecs:
+      self.skipTest(f"[DUT] Codec {preferred_codec.name} is not supported.")
+
+    self.dut.bt.audioSetRepeat(android_constants.RepeatMode.ONE)
+
+    with self.dut.bl4a.register_callback(bl4a_api.Module.A2DP) as dut_cb:
+      ref_avdtp_connection = await self._setup_a2dp_connection(
+          [preferred_codec]
+      )
+
+      self.logger.info("[DUT] Set codec config to SBC Mono.")
+      codec_config = bl4a_api.A2dpCodecConfiguration(
+          codec_type=android_constants.A2dpCodecType.SBC,
+          channel_mode=android_constants.A2dpChannelMode.MONO,
+          sample_rate=android_constants.A2dpSampleRate.RATE_44100,
+          bits_per_sample=android_constants.A2dpBitsPerSample.BITS_16,
+          priority=1_000_000,
+      )
+      self.dut.bl4a.set_a2dp_codec_config(self.ref.address, codec_config)
+
+      self.logger.info("[DUT] Wait for A2DP codec config changed to Mono.")
+
+      def match_event(e: bl4a_api.A2dpCodecConfigChanged) -> bool:
+        self.logger.info("Received event: %s", e)
+        if e.codec_config is None:
+          self.logger.info("codec_config is None in event!")
+          return False
+        return (
+            e.address == self.ref.address
+            and e.codec_config.codec_type == android_constants.A2dpCodecType.SBC
+            and e.codec_config.channel_mode
+            == android_constants.A2dpChannelMode.MONO
+        )
+
+      await dut_cb.wait_for_event(
+          bl4a_api.A2dpCodecConfigChanged,
+          predicate=match_event,
+          timeout=_DEFAULT_STEP_TIMEOUT_SECONDS,
+      )
+
+      ref_sinks = a2dp_ext.find_local_endpoints_by_codec(
+          ref_avdtp_connection,
+          preferred_codec.codec_type,
+          avdtp.LocalSink,
+          vendor_id=preferred_codec.vendor_id,
+          codec_id=preferred_codec.codec_id,
+      )
+      if not ref_sinks:
+        self.fail(f"No sink found for codec {preferred_codec.name}.")
+      ref_sink = a2dp_ext.LocalSinkWrapper(ref_sinks[0])
+
+      if self.dut.bt.isA2dpPlaying(self.ref.address):
+        self.logger.info("[DUT] A2DP is streaming, wait for A2DP stopped.")
+        await dut_cb.wait_for_event(
+            bl4a_api.A2dpPlayingStateChanged(
+                self.ref.address, _A2dpState.NOT_PLAYING
+            ),
+        )
+      async with (
+          self.assert_not_timeout(
+              _DEFAULT_STEP_TIMEOUT_SECONDS,
+              msg="[REF] A2DP is streaming, wait for A2DP stopped.",
+          ),
+          ref_sink.condition,
+      ):
+        await ref_sink.condition.wait_for(
+            lambda: ref_sink.stream_state != avdtp.State.STREAMING
+        )
+
+      buffer = a2dp_ext.register_sink_buffer(ref_sink.impl, preferred_codec)
+
+      self.logger.info("[DUT] Start stream.")
+      self.dut.bt.audioPlaySine()
+
+      self.logger.info("[DUT] Wait for A2DP started.")
+      await dut_cb.wait_for_event(
+          bl4a_api.A2dpPlayingStateChanged(
+              address=self.ref.address, state=_A2dpState.PLAYING
+          )
+      )
+      async with (
+          self.assert_not_timeout(
+              _DEFAULT_STEP_TIMEOUT_SECONDS, msg="[REF] Wait for A2DP started."
+          ),
+          ref_sink.condition,
+      ):
+        await ref_sink.condition.wait_for(
+            lambda: ref_sink.stream_state == avdtp.State.STREAMING
+        )
+
+      self.logger.info(
+          "[DUT] Stream for %d seconds.", _DEFAULT_STREAM_DURATION_SECONDS
+      )
+      await asyncio.sleep(_DEFAULT_STREAM_DURATION_SECONDS)
+
+      self.logger.info("[DUT] Stop stream.")
+      self.dut.bt.audioPause()
+
+      self.logger.info("[DUT] Wait for A2DP stopped.")
+      await dut_cb.wait_for_event(
+          bl4a_api.A2dpPlayingStateChanged(
+              address=self.ref.address, state=_A2dpState.NOT_PLAYING
+          )
+      )
+      async with (
+          self.assert_not_timeout(
+              _DEFAULT_STEP_TIMEOUT_SECONDS, msg="[REF] Wait for A2DP stopped."
+          ),
+          ref_sink.condition,
+      ):
+        await ref_sink.condition.wait_for(
+            lambda: ref_sink.stream_state != avdtp.State.STREAMING
+        )
+
+      if self.user_params.get(navi_test_base.RECORD_FULL_DATA) and buffer:
+        self.write_test_output_data(
+            f"a2dp_data_mono.{preferred_codec.format}",
+            buffer,
+        )
+
+      if buffer is not None and audio.SUPPORT_AUDIO_PROCESSING:
+        dominant_frequency = audio.get_dominant_frequency(
+            buffer=buffer,
+            codec=preferred_codec.name,
+            format=preferred_codec.format,
+        )
+        self.logger.info("Dominant frequency: %.2f", dominant_frequency)
+        if not self.dut.device.is_emulator:
+          self.assertAlmostEqual(
+              dominant_frequency,
+              1000,
+              delta=10,
+              msg=(
+                  f"Dominant frequency {dominant_frequency:.2f} is not close to"
+                  " 1000 Hz"
+              ),
+          )
 
   async def test_noisy_handling(self) -> None:
     """Tests enabling noisy handling, and verify the player is paused after A2DP disconnected.

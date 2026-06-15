@@ -30,6 +30,7 @@ from mobly import signals
 from typing_extensions import override
 
 from navi.bumble_ext import a2dp as a2dp_ext
+from navi.bumble_ext import avdtp as avdtp_ext
 from navi.bumble_ext import avrcp as avrcp_ext
 from navi.tests import navi_test_base
 from navi.utils import android_constants
@@ -132,7 +133,7 @@ class AvrcpTest(navi_test_base.TwoDevicesTestBase):
       self,
       codecs: list[_A2dpCodec],
       features: int,
-  ) -> tuple[avdtp.Listener, avrcp.Protocol]:
+  ) -> tuple[avdtp_ext.Listener, avrcp.Protocol]:
     """Sets up A2DP profile on REF.
 
     Args:

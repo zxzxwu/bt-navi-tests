@@ -21,6 +21,7 @@ import uuid
 from bumble import core
 from bumble import data_types
 from bumble import device
+from bumble import gatt
 from bumble import hci
 from mobly import test_runner
 
@@ -492,6 +493,8 @@ class LeHostTest(navi_test_base.TwoDevicesTestBase):
       await self.ref.device.set_scan_enable(
           inquiry_scan_enabled=False, page_scan_enabled=False
       )
+      self.dut.bt.startInquiry()
+
       # [REF] Start advertising.
       await self.ref.device.start_advertising(
           own_address_type=_OwnAddressType.PUBLIC,
@@ -513,7 +516,6 @@ class LeHostTest(navi_test_base.TwoDevicesTestBase):
               ])
           ),
       )
-      self.dut.bt.startInquiry()
 
       await dut_cb.wait_for_event(
           bl4a_api.DeviceFound,
@@ -642,7 +644,7 @@ class LeHostTest(navi_test_base.TwoDevicesTestBase):
     self.test_case_context.push(gatt_client)
     self.logger.info("[DUT] GATT client connected")
 
-    ref_connection = list(self.ref.device.connections.values())[0]
+    ref_connection = next(iter(self.ref.device.connections.values()))
     connection_parameters = [
         (android_constants.ConnectionPriority.DCK, 30.0, 30.0),
         (android_constants.ConnectionPriority.HIGH, 11.25, 15.0),
@@ -719,7 +721,7 @@ class LeHostTest(navi_test_base.TwoDevicesTestBase):
     self.logger.info("[DUT] GATT client connected")
 
     ref_subrate_changed = asyncio.get_running_loop().create_future()
-    ref_connection = list(self.ref.device.connections.values())[0]
+    ref_connection = next(iter(self.ref.device.connections.values()))
 
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):
       dut_features = await ref_connection.get_remote_le_features()
@@ -740,6 +742,451 @@ class LeHostTest(navi_test_base.TwoDevicesTestBase):
     self.logger.info("[REF] Wait for subrate mode change.")
     async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):
       await ref_subrate_changed
+
+  @navi_test_base.parameterized(
+      (android_constants.ConnectionPriority.HIGH),
+      (android_constants.ConnectionPriority.BALANCED),
+      (android_constants.ConnectionPriority.LOW_POWER),
+  )
+  async def test_subrate_mode_changed_by_subrate_mode_request(
+      self,
+      mode_to_set: android_constants.ConnectionPriority,
+  ) -> None:
+    """Test subrate mode changed by subrate mode request.
+
+    Test steps:
+      1. Start advertising on REF.
+      2. Connect GATT(and LE-ACL) to REF from DUT.
+      3. Set connection priority to the given mode.
+      4. Set subrate mode to low and verify the subrate mode is changed to low.
+      5. Set subrate mode to balanced and verify the subrate mode is changed to
+      balanced.
+      6. Set subrate mode to high and verify the subrate mode is changed to
+      high.
+      7. Set subrate mode to off and verify the subrate mode is changed to off.
+
+    Args:
+      mode_to_set: The connection priority to set.
+    """
+
+    service_uuid = str(uuid.uuid4())
+    characteristic_uuid = str(uuid.uuid4())
+
+    self.ref.device.add_service(
+        gatt.Service(
+            uuid=service_uuid,
+            characteristics=[
+                gatt.Characteristic(
+                    uuid=characteristic_uuid,
+                    properties=gatt.Characteristic.Properties.WRITE,
+                    permissions=gatt.Characteristic.Permissions.WRITEABLE,
+                    value=gatt.CharacteristicValue(),
+                )
+            ],
+        )
+    )
+
+    if self.dut.bt.getSdkVersion() < 37:
+      self.skipTest("DUT does not support this feature in this SDK version.")
+
+    if not self.ref.device.supports_le_features(
+        hci.LeFeatureMask.CONNECTION_SUBRATING
+    ):
+      self.skipTest("REF does not support LE subrating.")
+
+    self.logger.info("[REF] Start advertising.")
+    await self.ref.device.start_advertising(
+        own_address_type=hci.OwnAddressType.RANDOM
+    )
+    await self.ref.device.send_command(
+        hci.HCI_LE_Set_Host_Feature_Command(
+            bit_number=hci.LeFeature.CONNECTION_SUBRATING_HOST_SUPPORT,
+            bit_value=1,
+        ),
+        check_result=True,
+    )
+    self.logger.info("[DUT] Connect to REF.")
+    gatt_client = await self.dut.bl4a.connect_gatt_client(
+        str(self.ref.random_address),
+        android_constants.Transport.LE,
+        android_constants.AddressTypeStatus.RANDOM,
+    )
+
+    ref_connection = next(iter(self.ref.device.connections.values()))
+    async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):
+      dut_features = await ref_connection.get_remote_le_features()
+    if not (
+        dut_features & hci.LeFeatureMask.CONNECTION_SUBRATING
+        and dut_features & hci.LeFeatureMask.CONNECTION_SUBRATING_HOST_SUPPORT
+    ):
+      self.skipTest("DUT does not support LE subrating.")
+
+    self.logger.info(
+        "[DUT] Request connection priority in the beginning: %s", mode_to_set
+    )
+
+    await gatt_client.request_connection_priority(mode_to_set)
+
+    for mode in [
+        android_constants.LeSubrateMode.LOW,
+        android_constants.LeSubrateMode.BALANCED,
+        android_constants.LeSubrateMode.HIGH,
+        android_constants.LeSubrateMode.OFF,
+    ]:
+      self.logger.info("[DUT] Request subrate mode to %s.", mode.name)
+      subrate_mode = await gatt_client.request_subrate_mode(mode)
+      self.assertEqual(
+          subrate_mode,
+          mode,
+          f"Subrate mode is not changed to {mode.name}.",
+      )
+
+    gatt_client.close()
+
+  async def test_subrate_mode_changed_with_multiple_clients(self) -> None:
+    """Test subrate mode changed with multiple clients.
+
+    Test steps:
+      1. Start advertising on REF.
+      2. Client1: Connect GATT(and LE-ACL) to REF from DUT.
+      3. Client1: Set connection priority to balanced.
+      4. Client1: Set subrate mode to balanced and verify the subrate mode is
+      changed to balanced.
+      5. Client2: Connect GATT(and LE-ACL) to REF from DUT.
+      6. Client2: Set subrate mode to high and verify the subrate mode is
+      changed to high.
+      7. Client3: Connect GATT(and LE-ACL) to REF from DUT.
+      8. Client3: Set subrate mode to low and verify the subrate mode is still
+      high.
+      9. Client2: Disconnect from REF.
+      10. Client3: Set subrate mode to low and verify the subrate mode is
+      changed to balanced.
+    """
+
+    service_uuid = str(uuid.uuid4())
+    characteristic_uuid = str(uuid.uuid4())
+
+    write_future = asyncio.get_running_loop().create_future()
+
+    def on_write(connection: device.Connection, value: bytes) -> None:
+      del connection  # Unused.
+      write_future.set_result(value)
+
+    self.ref.device.add_service(
+        gatt.Service(
+            uuid=service_uuid,
+            characteristics=[
+                gatt.Characteristic(
+                    uuid=characteristic_uuid,
+                    properties=gatt.Characteristic.Properties.WRITE,
+                    permissions=gatt.Characteristic.Permissions.WRITEABLE,
+                    value=gatt.CharacteristicValue(write=on_write),
+                )
+            ],
+        )
+    )
+
+    if self.dut.bt.getSdkVersion() < 37:
+      self.skipTest("DUT does not support this feature in this SDK version.")
+
+    if not self.ref.device.supports_le_features(
+        hci.LeFeatureMask.CONNECTION_SUBRATING
+    ):
+      self.skipTest("REF does not support LE subrating.")
+
+    self.logger.info("[REF] Start advertising.")
+    await self.ref.device.start_advertising(
+        own_address_type=hci.OwnAddressType.RANDOM
+    )
+    await self.ref.device.send_command(
+        hci.HCI_LE_Set_Host_Feature_Command(
+            bit_number=hci.LeFeature.CONNECTION_SUBRATING_HOST_SUPPORT,
+            bit_value=1,
+        ),
+        check_result=True,
+    )
+
+    gatt_clients = []
+    for i in range(1, 4):
+      self.logger.info("[DUT] Connect to REF with client%s.", i)
+      gatt_client = await self.dut.bl4a.connect_gatt_client(
+          str(self.ref.random_address),
+          android_constants.Transport.LE,
+          android_constants.AddressTypeStatus.RANDOM,
+      )
+      gatt_clients.append(gatt_client)
+
+    self.assertLen(gatt_clients, 3)
+
+    self.logger.info(
+        "[DUT] Request connection priority to balanced in the beginning."
+    )
+
+    ref_connection = next(iter(self.ref.device.connections.values()))
+    async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):
+      dut_features = await ref_connection.get_remote_le_features()
+    if not (
+        dut_features & hci.LeFeatureMask.CONNECTION_SUBRATING
+        and dut_features & hci.LeFeatureMask.CONNECTION_SUBRATING_HOST_SUPPORT
+    ):
+      self.skipTest("DUT does not support LE subrating.")
+
+    await gatt_clients[0].request_connection_priority(
+        android_constants.ConnectionPriority.BALANCED
+    )
+
+    self.logger.info("[DUT] Client1: Request subrate mode to balanced.")
+    subrate_mode = await gatt_clients[0].request_subrate_mode(
+        android_constants.LeSubrateMode.BALANCED
+    )
+
+    self.assertEqual(
+        subrate_mode,
+        android_constants.LeSubrateMode.BALANCED,
+        "Subrate mode is not changed to balanced.",
+    )
+
+    self.logger.info("[DUT] Client2: Request subrate mode to high.")
+    subrate_mode2 = await gatt_clients[1].request_subrate_mode(
+        android_constants.LeSubrateMode.HIGH
+    )
+
+    self.assertEqual(
+        subrate_mode2,
+        android_constants.LeSubrateMode.HIGH,
+        "Subrate mode is not changed to high.",
+    )
+
+    self.logger.info("[DUT] Client3: Request subrate mode to low.")
+    subrate_mode = await gatt_clients[2].request_subrate_mode(
+        android_constants.LeSubrateMode.LOW
+    )
+
+    self.logger.info(
+        "[DUT] Verify subrate mode is still high because there are multiple"
+        " subrate mode requests [BALANCED, HIGH, LOW] in the connection,"
+        " system will choose the highest priority one."
+    )
+
+    self.assertEqual(
+        subrate_mode,
+        android_constants.LeSubrateMode.HIGH,
+        "Subrate mode is not changed to high.",
+    )
+
+    gatt_clients[1].close()
+
+    self.logger.info(
+        "[DUT] Verify subrate mode is changed to balanced because there are"
+        " multiple subrate mode requests [BALANCED, LOW] in the connection"
+        " and client2 is disconnected."
+        " system will choose the highest priority one."
+    )
+
+    subrate_mode = await gatt_clients[2].request_subrate_mode(
+        android_constants.LeSubrateMode.LOW
+    )
+
+    self.assertEqual(
+        subrate_mode,
+        android_constants.LeSubrateMode.BALANCED,
+        "Subrate mode is not changed to balanced.",
+    )
+
+    gatt_clients[0].close()
+    gatt_clients[2].close()
+    gatt_clients.clear()
+
+  @navi_test_base.parameterized(
+      (android_constants.LeSubrateMode.LOW),
+      (android_constants.LeSubrateMode.BALANCED),
+      (android_constants.LeSubrateMode.HIGH),
+  )
+  async def test_subrate_mode_changed_when_connection_priority_changed(
+      self,
+      subrate_mode_to_set: android_constants.LeSubrateMode,
+  ) -> None:
+    """Test that the subrate mode persists when connection priority changes.
+
+    Test steps:
+      1. Start advertising on REF.
+      2. Connect GATT(and LE-ACL) to REF from DUT.
+      3. Set connection priority to high.
+      4. Set subrate mode to the given mode and verify the subrate mode is
+      changed to the given mode.
+      5. Set connection priority to balanced and verify received the subrate
+      mode is still the given mode.
+      6. Set connection priority to low power and verify received the subrate
+      mode is still the given mode.
+
+    Args:
+      subrate_mode_to_set: The subrate mode to set and verify.
+    """
+
+    service_uuid = str(uuid.uuid4())
+    characteristic_uuid = str(uuid.uuid4())
+
+    self.ref.device.add_service(
+        gatt.Service(
+            uuid=service_uuid,
+            characteristics=[
+                gatt.Characteristic(
+                    uuid=characteristic_uuid,
+                    properties=gatt.Characteristic.Properties.WRITE,
+                    permissions=gatt.Characteristic.Permissions.WRITEABLE,
+                    value=gatt.CharacteristicValue(),
+                )
+            ],
+        )
+    )
+
+    if self.dut.bt.getSdkVersion() < 37:
+      self.skipTest("DUT does not support this feature in this SDK version.")
+
+    if not self.ref.device.supports_le_features(
+        hci.LeFeatureMask.CONNECTION_SUBRATING
+    ):
+      self.skipTest("REF does not support LE subrating.")
+
+    self.logger.info("[REF] Start advertising.")
+    await self.ref.device.start_advertising(
+        own_address_type=hci.OwnAddressType.RANDOM
+    )
+    await self.ref.device.send_command(
+        hci.HCI_LE_Set_Host_Feature_Command(
+            bit_number=hci.LeFeature.CONNECTION_SUBRATING_HOST_SUPPORT,
+            bit_value=1,
+        ),
+        check_result=True,
+    )
+    self.logger.info("[DUT] Connect to REF.")
+    gatt_client = await self.dut.bl4a.connect_gatt_client(
+        str(self.ref.random_address),
+        android_constants.Transport.LE,
+        android_constants.AddressTypeStatus.RANDOM,
+    )
+
+    self.logger.info(
+        "[DUT] Request connection priority to high in the beginning."
+    )
+
+    await gatt_client.request_connection_priority(
+        android_constants.ConnectionPriority.HIGH
+    )
+
+    ref_connection = next(iter(self.ref.device.connections.values()))
+    async with self.assert_not_timeout(_DEFAULT_TIMEOUT_SECONDS):
+      dut_features = await ref_connection.get_remote_le_features()
+    if not (
+        dut_features & hci.LeFeatureMask.CONNECTION_SUBRATING
+        and dut_features & hci.LeFeatureMask.CONNECTION_SUBRATING_HOST_SUPPORT
+    ):
+      self.skipTest("DUT does not support LE subrating.")
+
+    self.logger.info("[DUT] Request subrate mode to low.")
+    subrate_mode = await gatt_client.request_subrate_mode(
+        subrate_mode_to_set
+    )
+
+    self.assertEqual(
+        subrate_mode,
+        subrate_mode_to_set,
+        f"Subrate mode is not changed to {subrate_mode_to_set}",
+    )
+
+    self.logger.info(
+        "[DUT] Request connection priority to balanced in the beginning."
+    )
+    await gatt_client.request_connection_priority(
+        android_constants.ConnectionPriority.BALANCED
+    )
+
+    await gatt_client.wait_for_event(
+        event=bl4a_api.GattSubrateChanged,
+        predicate=lambda e: e.subrate_mode == subrate_mode_to_set,
+    )
+
+    self.logger.info(
+        "[DUT] Request connection priority to Low power in the beginning."
+    )
+    await gatt_client.request_connection_priority(
+        android_constants.ConnectionPriority.LOW_POWER
+    )
+
+    await gatt_client.wait_for_event(
+        event=bl4a_api.GattSubrateChanged,
+        predicate=lambda e: e.subrate_mode == subrate_mode_to_set,
+    )
+    gatt_client.close()
+
+  async def test_scan_on_found_and_on_lost(self) -> None:
+    """Test scanning with callback type FIRST_MATCH/MATCH_LOST.
+
+    Test steps:
+      1. Set REF to start advertising.
+      2. Start scanning on DUT with callback type FIRST_MATCH+MATCH_LOST.
+      3. Check if DUT received scan result from REF(FIRST_MATCH).
+      4. Set REF to stop advertising.
+      5. Check if DUT received scan result from REF(MATCH_LOST).
+    """
+    if self.dut.device.is_emulator:
+      self.skipTest("Rootcanal doesn't support APCF yet.")
+
+    ref_service_uuid = str(uuid.uuid4())
+
+    self.logger.info("[REF] Start advertising")
+    await self.ref.device.start_advertising(
+        own_address_type=hci.OwnAddressType.RANDOM,
+        advertising_type=device.AdvertisingType.UNDIRECTED_CONNECTABLE_SCANNABLE,
+        advertising_interval_min=_MIN_ADVERTISING_INTERVAL_MS,
+        advertising_interval_max=_MIN_ADVERTISING_INTERVAL_MS,
+        advertising_data=bytes(
+            _AdvertisingData([
+                data_types.Flags(
+                    core.AdvertisingData.Flags.LE_GENERAL_DISCOVERABLE_MODE
+                ),
+                data_types.CompleteListOf128BitServiceUUIDs(
+                    [core.UUID(ref_service_uuid)]
+                ),
+            ])
+        ),
+    )
+
+    self.logger.info(
+        "[DUT] Start scanning with callback FIRST_MATCH+MATCH_LOST"
+    )
+    with self.dut.bl4a.start_scanning(
+        scan_settings=bl4a_api.ScanSettings(
+            scan_mode=android_constants.BleScanMode.LOW_LATENCY,
+            callback_type=(
+                android_constants.BleScanCallbackType.FIRST_MATCH
+                | android_constants.BleScanCallbackType.MATCH_LOST
+            ),
+            legacy=False,
+        ),
+        scan_filter=bl4a_api.ScanFilter(service_uuids=ref_service_uuid),
+    ) as scan_cb:
+      self.logger.info("[DUT] Wait for scan result (FIRST_MATCH)")
+      first_match_event = await scan_cb.wait_for_event(
+          bl4a_api.ScanResult,
+          timeout=_DEFAULT_TIMEOUT_SECONDS,
+      )
+      self.assertEqual(
+          first_match_event.address,
+          self.ref.random_address,
+          "FIRST_MATCH scan result is not correct",
+      )
+
+      self.logger.info("[REF] stopping advertising")
+      await self.ref.device.stop_advertising()
+
+      self.logger.info("[DUT] Wait for scan result (MATCH_LOST)")
+      match_lost_event = await scan_cb.wait_for_event(bl4a_api.ScanResult)
+      self.assertEqual(
+          match_lost_event.address,
+          self.ref.random_address,
+          "MATCH_LOST scan result is not correct",
+      )
 
 
 if __name__ == "__main__":

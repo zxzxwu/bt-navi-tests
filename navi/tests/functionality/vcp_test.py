@@ -108,6 +108,11 @@ class VcpTest(navi_test_base.TwoDevicesTestBase):
     ) as vcp_cb:
       self.logger.info("[DUT] Setting VCP connection policy...")
       await self.le_connect_and_pair(hci.OwnAddressType.RANDOM, self.ref)
+      self.logger.info("[DUT] Set MTU to 517 for REF")
+      gatt_client = await self.dut.bl4a.connect_gatt_client(
+          self.ref.random_address, transport=android_constants.Transport.LE
+      )
+      await gatt_client.request_mtu(517)
       self.dut.bt.vcpSetConnectionPolicy(
           self.ref.random_address, android_constants.ConnectionPolicy.ALLOWED
       )
@@ -220,6 +225,11 @@ class VcpTest(navi_test_base.TwoDevicesTestBase):
     vcp_cb = self.dut.bl4a.register_callback(bl4a_api.Module.VOLUME_CONTROL)
     self.test_case_context.callback(vcp_cb.close)
     await self.le_connect_and_pair(hci.OwnAddressType.RANDOM, self.ref)
+    self.logger.info("[DUT] Set MTU to 517 for REF")
+    gatt_client = await self.dut.bl4a.connect_gatt_client(
+        self.ref.random_address, transport=android_constants.Transport.LE
+    )
+    await gatt_client.request_mtu(517)
     self.logger.info("[DUT] Setting VCP connection policy...")
     self.dut.bt.vcpSetConnectionPolicy(
         self.ref.random_address, android_constants.ConnectionPolicy.ALLOWED

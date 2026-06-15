@@ -180,6 +180,7 @@ class BluetoothAdapterSnippet : Snippet {
         addAction(BluetoothDevice.ACTION_UUID)
         addAction(BluetoothDevice.ACTION_ENCRYPTION_CHANGE)
         addAction(BluetoothDevice.ACTION_KEY_MISSING)
+        addAction(BluetoothDevice.ACTION_NAME_CHANGED)
         addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
       }
     broadcastReceivers[callbackId] =
@@ -249,6 +250,14 @@ class BluetoothAdapterSnippet : Snippet {
             BluetoothAdapter.ACTION_STATE_CHANGED ->
               postSnippetEvent(callbackId, SnippetConstants.ADAPTER_STATE_CHANGED) {
                 putInt(SnippetConstants.FIELD_STATE, adapterState)
+              }
+            BluetoothDevice.ACTION_NAME_CHANGED ->
+              postSnippetEvent(callbackId, SnippetConstants.NAME_CHANGED) {
+                putString(SnippetConstants.FIELD_DEVICE, device?.address)
+                putString(
+                  SnippetConstants.FIELD_NAME,
+                  intent.getStringExtra(BluetoothDevice.EXTRA_NAME),
+                )
               }
             BluetoothDevice.ACTION_ENCRYPTION_CHANGE ->
               postSnippetEvent(callbackId, SnippetConstants.ENCRYPTION_CHANGE) {
@@ -426,7 +435,21 @@ class BluetoothAdapterSnippet : Snippet {
    * [android.bluetooth.BluetoothStatusCodes].
    */
   @Rpc(description = "Disconnect from a remote device")
-  fun disconnect(address: String): Int = bluetoothAdapter.getRemoteDevice(address).disconnect()
+  fun disconnect(address: String): Int {
+    val device = bluetoothAdapter.getRemoteDevice(address)
+    return device.disconnect()
+  }
+
+  /**
+   * Disconnects a remote device of [address] and returns the status defined in
+   * [android.bluetooth.BluetoothStatusCodes].
+   */
+  @Rpc(description = "Disconnect from a remote device")
+  fun disconnectAcl(address: String, transport: Int): Int {
+    val device = bluetoothAdapter.getRemoteDevice(address)
+    return device.javaClass.getMethod("disconnectAcl", Int::class.java).invoke(device, transport)
+      as Int
+  }
 
   /** Returns whether a device of [address] is connected on [transport]. (Android U+) */
   @Rpc(description = "Get if a device is connected on given transport (Android U+)")

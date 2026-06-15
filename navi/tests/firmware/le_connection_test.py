@@ -23,7 +23,6 @@ from bumble import hci
 from bumble import keys
 from mobly import test_runner
 
-from navi.bumble_ext import crown
 from navi.tests import navi_test_base
 from navi.tests.firmware import test_base
 from navi.utils import constants
@@ -479,10 +478,7 @@ class LeConnectionTest(test_base.DualDeviceTestBase):
         self.skipTest('CIS central is not supported on REF.')
       # TODO: Remove once the flag is rolled out to our emulator
       # image.
-      if (
-          isinstance(self.dut.adapter, crown.AndroidCrownAdapter)
-          and self.dut.adapter.ad.is_emulator
-      ):
+      if self.is_emulator:
         self.skipTest('Emulator Bluetooth HAL does not support CIS peripheral.')
 
     # Enable Connected Isochronous Stream.

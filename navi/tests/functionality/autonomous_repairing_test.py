@@ -729,7 +729,7 @@ class AutonomousRepairingTest(navi_test_base.TwoDevicesTestBase):
 
     auth_task: asyncio.Task[None] | None = None
     ref_dut_acl: device.Connection | None = None
-    server: bl4a_api.RfcommServer | None = None
+    server: bl4a_api.RfcommServerSocket | None = None
 
     if pairing_direction == constants.Direction.OUTGOING:
       ref_accept_future = asyncio.get_running_loop().create_future()
@@ -747,18 +747,19 @@ class AutonomousRepairingTest(navi_test_base.TwoDevicesTestBase):
           )
       )
 
-      self.dut.bl4a.snippet.rfcommConnectWithUuid(
-          self.ref.address,
-          False,
-          _RFCOMM_UUID,
-          False,
+      dut_socket = self.dut.bl4a.create_rfcomm_channel_async(
+          address=self.ref.address,
+          secure=False,
+          uuid=_RFCOMM_UUID,
       )
+      self.test_case_context.push_async_exit(dut_socket)
     else:
       self.logger.info("[DUT] Listen RFCOMM.")
       server = self.dut.bl4a.create_rfcomm_server(
           _RFCOMM_UUID,
           secure=False,
       )
+      self.test_case_context.push(server)
 
       self.logger.info("[REF] Connect to DUT.")
       ref_dut_acl = await self.ref.device.connect(
@@ -929,6 +930,7 @@ class AutonomousRepairingTest(navi_test_base.TwoDevicesTestBase):
         )
     else:
       dut_server = self.dut.bl4a.create_l2cap_server(secure=False)
+      self.test_case_context.push(dut_server)
       self.logger.info("[DUT] Listen L2CAP on PSM %d", dut_server.psm)
 
       self.logger.info("[DUT] Start advertising.")

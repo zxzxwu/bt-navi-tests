@@ -293,8 +293,9 @@ class HidDeviceTest(navi_test_base.TwoDevicesTestBase):
         self.ref.address, hid_ext.HandshakeMessage.ResultCode.NOT_READY
     )
 
-    with self.assertRaises(hid_ext.HidProtocolError) as control_message:
-      await get_report_task
+    async with self.assert_not_timeout(_DEFAULT_STEP_TIMEOUT_SECONDS):
+      with self.assertRaises(hid_ext.HidProtocolError) as control_message:
+        await get_report_task
     self.assertEqual(
         control_message.exception.result_code,
         hid_ext.HandshakeMessage.ResultCode.NOT_READY,
@@ -317,6 +318,28 @@ class HidDeviceTest(navi_test_base.TwoDevicesTestBase):
         self.dut.bt.getHidDeviceUserAppName(),
         android_constants.PACKAGE_NAME_BLUETOOTH_SNIPPET,
     )
+
+  async def test_bad_descriptor_hid_device(self) -> None:
+    """Tests registering HID Device App with a bad descriptor.
+
+    Note: Bad descriptor is allowed in Android because it doesn't perform
+    semantic validation.
+
+    Test steps:
+      1. Register HID Device App with bad descriptor.
+      2. Verify that the registration is successful.
+    """
+    self.logger.info("[DUT] Register HID Device App with bad descriptor")
+    with self.dut.bl4a.register_hid_device_app(
+        descriptors=[0xFE, 0xFE, 0xFE]
+    ) as bad_dut_hid_cb:
+      self.logger.info("[DUT] Wait for app registration status")
+      await bad_dut_hid_cb.wait_for_event(
+          bl4a_api.HidDeviceAppStatusChanged(
+              address=None,
+              registered=True,
+          )
+      )
 
 
 if __name__ == "__main__":

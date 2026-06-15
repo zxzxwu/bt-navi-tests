@@ -22,6 +22,7 @@ import contextlib
 import io
 import subprocess
 import sys
+import threading
 import time
 from typing import Self
 import uuid
@@ -41,7 +42,6 @@ from typing_extensions import override
 from navi.utils import resources
 from navi.utils import adb_snippets
 from navi.utils import retry
-
 
 _HCI_PROXY_G3_PATH_PREFIX = 'navi/bumble_ext/android_hci_proxy_'
 _HCI_PROXY_DEVICE_PATH = '/data/local/tmp/hci_proxy'
@@ -241,10 +241,8 @@ class AndroidCrownAdapter(CrownAdapter):
     self.ad.adb.shell(['cmd', 'bluetooth_manager', 'wait-for-state:STATE_OFF'])
     # TODO: Remove this once the bug is fixed.
     if (
-        self.ad.adb.shell(['getprop', 'persist.bluetooth.leaudio_sw_offload'])
-        != 'false'
-        or self.ad.adb.shell(['getprop', 'persist.bluetooth.sw_offload'])
-        != 'false'
+        self.ad.adb.getprop('persist.bluetooth.leaudio_sw_offload') != 'false'
+        or self.ad.adb.getprop('persist.bluetooth.sw_offload') != 'false'
     ):
       self.ad.adb.shell(
           ['setprop', 'persist.bluetooth.leaudio_sw_offload', 'false']
@@ -262,6 +260,10 @@ class AndroidCrownAdapter(CrownAdapter):
     self.ad.adb.push([file_path, _HCI_PROXY_DEVICE_PATH], timeout=60)
     self.ad.adb.shell(f'chmod +x {_HCI_PROXY_DEVICE_PATH}')
 
+    # Kill HCI proxy if it is already running.
+    with contextlib.suppress(adb.Error):
+      self.ad.adb.shell(['killall', '-w', 'hci_proxy'])
+
     self._hci_proxy_process = subprocess.Popen(
         [
             'adb',
@@ -271,11 +273,23 @@ class AndroidCrownAdapter(CrownAdapter):
             f'{_HCI_PROXY_DEVICE_PATH} @{_DEVICE_ABSTRACT_SOCKET_PATH}',
         ],
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         stdin=subprocess.PIPE,
     )
     # Wait for HCI proxy to start.
-    time.sleep(1.0)
+    if self._hci_proxy_process.stdout is not None:
+      ready_event = threading.Event()
+
+      def read_output() -> None:
+        if self._hci_proxy_process.stdout is not None:
+          for line in self._hci_proxy_process.stdout:
+            if b'ready' in line:
+              ready_event.set()
+
+      thread = threading.Thread(target=read_output, daemon=True)
+      thread.start()
+      if not ready_event.wait(timeout=5.0):
+        raise TimeoutError('Timed out waiting for HCI proxy to start')
 
     if sys.platform == 'linux':
       # Select a random socket name to avoid collision.
@@ -300,18 +314,17 @@ class AndroidCrownAdapter(CrownAdapter):
   @override
   def stop(self) -> None:
     """Stops the HCI Proxy."""
-    # Kill HCI proxy.
-    self.ad.adb.shell(['killall', 'hci_proxy'])
     # Remove forwarding.
     if sys.platform == 'linux':
       self.ad.adb.forward(['--remove', f'localabstract:{self._socket_name}'])
     else:
       self.ad.adb.forward(['--remove', f'tcp:{self._socket_name}'])
-    self._hci_proxy_process.kill()
     # Disable Satellite Mode.
     self.ad.adb.shell(
         ['settings', 'put', 'global', 'satellite_mode_enabled', '0']
     )
+    self._hci_proxy_process.kill()
+    self._hci_proxy_process.wait(10.0)
 
   @override
   def dump_debug_logs(self, output_dir: str) -> None:

@@ -220,6 +220,11 @@ constants {
 }
 
 constants {
+  name: "HID_DEVICE_APP_STATUS_CHANGED"
+  string_value: "HID_DEVICE_APP_STATUS_CHANGED"
+}
+
+constants {
   name: "ACTIVE_DEVICE_CHANGED"
   string_value: "ACTIVE_DEVICE_CHANGED"
 }
@@ -276,6 +281,11 @@ constants {
 constants {
   name: "BATTERY_LEVEL_CHANGED"
   string_value: "BATTERY_LEVEL_CHANGED"
+}
+
+constants {
+  name: "NAME_CHANGED"
+  string_value: "NAME_CHANGED"
 }
 
 constants {
@@ -1043,6 +1053,11 @@ constants {
   string_value: "CALL_STATE_CHANGED"
 }
 
+constants {
+  name: "CALL_REMOVED"
+  string_value: "CALL_REMOVED"
+}
+
 # ===================== #
 # InputSnippet          #
 # ===================== #
@@ -1412,3 +1427,38 @@ constants {
   name: "PAIRING_VARIANT"
   string_value: "pairing_variant"
 }
+
+# ============================ #
+# BluetoothSocketSettings      #
+# ============================ #
+
+constants {
+  name: "SOCKET_SETTINGS_ENCRYPTION_REQUIRED"
+  string_value: "encryption_required"
+}
+
+constants {
+  name: "SOCKET_SETTINGS_AUTHENTICATION_REQUIRED"
+  string_value: "authentication_required"
+}
+
+constants {
+  name: "SOCKET_SETTINGS_L2CAP_PSM"
+  string_value: "l2cap_psm"
+}
+
+constants {
+  name: "SOCKET_SETTINGS_SOCKET_TYPE"
+  string_value: "socket_type"
+}
+
+constants {
+  name: "SOCKET_SETTINGS_RFCOMM_UUID"
+  string_value: "rfcomm_uuid"
+}
+
+constants {
+  name: "SOCKET_SETTINGS_RFCOMM_SERVICE_NAME"
+  string_value: "rfcomm_service_name"
+}
+

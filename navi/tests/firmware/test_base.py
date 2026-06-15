@@ -54,6 +54,7 @@ class _FirmwareTestBase(navi_test_base.BaseTestBase):
   NUMBLE_OF_DEVICES: int
   _devices: list[crown.CrownDevice]
   _android_devices: list[android_device.AndroidDevice]
+  is_emulator: bool = False
 
   @override
   async def async_setup_class(self):
@@ -67,8 +68,15 @@ class _FirmwareTestBase(navi_test_base.BaseTestBase):
             await crown.CrownDevice.from_android_device(device)
             for device in self._android_devices
         ]
+        if self._android_devices:
+          self.is_emulator = any(
+              device.is_emulator for device in self._android_devices
+          )
       case _CrownDriver.PASSTHROUGH:
-        self._android_devices = self._get_android_controllers(1)
+        no_android = bool(self.user_params.get("no_android", False))
+        self._android_devices = (
+            [] if no_android else self._get_android_controllers(1)
+        )
         crown_driver_specs = self.user_params.get("crown_driver_specs", "")
         if isinstance(crown_driver_specs, str):
           crown_driver_specs = [
@@ -77,10 +85,12 @@ class _FirmwareTestBase(navi_test_base.BaseTestBase):
         self._devices = [
             await crown.CrownDevice.from_android_device(device)
             for device in self._android_devices
+            if not no_android
         ] + [
             await crown.CrownDevice.create(crown.CrownAdapter(hci_spec))
             for hci_spec in crown_driver_specs
         ]
+        self.is_emulator = bool(self.user_params.get("is_emulator", False))
       case _:
         raise ValueError("Unsupported Crown driver")
 
