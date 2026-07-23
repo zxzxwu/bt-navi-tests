@@ -141,6 +141,8 @@ This test suite has been integrated with [Mobly Android Partner Tools](https://g
 mobly_runner navi_smoke -c config.yml -tb default -i [-u]
 # Venti (More functionality tests)
 mobly_runner navi_venti -c config.yml -tb default -i [-u]
+# Firmware
+mobly_runner navi_firmware -c config.yml -tb default -i [-u]
 # All (Smoke + Venti)
 mobly_runner navi_all -c config.yml -tb default -i [-u]
 ```
